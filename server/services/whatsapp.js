@@ -6,7 +6,7 @@ const { sendEscalationEmail } = require('./email');
 const fs = require('fs');
 const path = require('path');
 
-const GRAPH_API_URL = 'https://graph.facebook.com/v18.0';
+const GRAPH_API_URL = 'https://graph.facebook.com/v21.0'; // v18.0 deprecated Sept 2024
 
 const OLD_ELVET_APARTMENTS = [
   'The Villiers','The Barrington','The Egerton','The Wolsey','The Tunstall','The Montague',
