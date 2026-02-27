@@ -168,7 +168,7 @@ async function callLLM(messages, options = {}) {
 async function callAnthropic(messages, apiKey, options = {}) {
   const msgs = messages.map(m => ({ role: m.role === 'system' ? 'user' : m.role, content: m.content })).filter(m => m.role !== 'system');
   const response = await axios.post('https://api.anthropic.com/v1/messages', {
-    model: options.model || 'claude-sonnet-4-20250514', max_tokens: options.maxTokens || 1024,
+    model: options.model || 'claude-haiku-4-5-20251001', max_tokens: options.maxTokens || 1024,
     system: (options.systemPrompt || SYSTEM_PROMPT) + (options.additionalContext || ''), messages: msgs
   }, { headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' }, timeout: 30000 });
   return response.data.content[0].text;
@@ -192,7 +192,7 @@ Respond ONLY with JSON:
 
   if (provider === 'anthropic') {
     const r = await axios.post('https://api.anthropic.com/v1/messages', {
-      model: 'claude-sonnet-4-20250514', max_tokens: 1024,
+      model: 'claude-haiku-4-5-20251001', max_tokens: 1024,
       messages: [{ role: 'user', content: [{ type: 'image', source: { type: 'base64', media_type: mimeType, data: imageBase64 } }, { type: 'text', text: prompt }] }]
     }, { headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' }, timeout: 30000 });
     return r.data.content[0].text;
