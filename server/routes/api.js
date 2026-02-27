@@ -253,13 +253,21 @@ router.get('/webhook/whatsapp', (req, res) => {
   const mode = req.query['hub.mode'];
   const token = req.query['hub.verify_token'];
   const challenge = req.query['hub.challenge'];
-  if (mode === 'subscribe' && token === verifyToken) { console.log('[WhatsApp] Webhook verified'); res.status(200).send(challenge); }
+  console.log(`[WhatsApp] Verification - mode: ${mode}, match: ${token === verifyToken}`); if (mode === 'subscribe' && token === verifyToken) { console.log('[WhatsApp] Webhook verified OK'); res.status(200).send(challenge); }
   else res.status(403).send('Forbidden');
 });
 
-router.post('/webhook/whatsapp', async (req, res) => {
+router.post('/webhook/whatsapp', (req, res) => {
+  // Respond 200 IMMEDIATELY - Meta will retry if it doesn't get this fast
   res.status(200).send('OK');
-  try { await processIncomingMessage(req.body); } catch (err) { console.error('[Webhook] Error:', err); }
+  const body = req.body;
+  console.log('[WhatsApp] Webhook POST received, object:', body?.object, '| entry count:', body?.entry?.length);
+  if (!body || body.object !== 'whatsapp_business_account') {
+    console.log('[WhatsApp] Ignoring - not a whatsapp_business_account payload');
+    return;
+  }
+  // Process async - do NOT await here, we already sent 200
+  processIncomingMessage(body).catch(err => console.error('[Webhook] Processing error:', err.message));
 });
 
 // ===== AI ISSUE REPORT =====
