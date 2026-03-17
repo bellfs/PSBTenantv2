@@ -37,6 +37,7 @@ export const api = {
   getIssueStats: () => request('/issues/stats'),
   getIssue: (id) => request(`/issues/${id}`),
   updateIssue: (id, data) => request(`/issues/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteIssue: (id) => request(`/issues/${id}`, { method: 'DELETE' }),
   respondToIssue: (id, message) => request(`/issues/${id}/respond`, { method: 'POST', body: JSON.stringify({ message }) }),
   generateReport: (id) => request(`/issues/${id}/report`),
   getIssueNotes: (id) => request(`/issues/${id}/notes`),

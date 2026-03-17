@@ -109,6 +109,28 @@ router.put('/:id', authenticate, async (req, res) => {
   } finally { db.close(); }
 });
 
+// Delete an issue and all related data
+router.delete('/:id', authenticate, (req, res) => {
+  const db = getDb();
+  try {
+    const issue = db.prepare('SELECT id, uuid FROM issues WHERE id = ?').get(req.params.id);
+    if (!issue) return res.status(404).json({ error: 'Issue not found' });
+
+    // Delete related records first (foreign key dependencies)
+    db.prepare('DELETE FROM internal_notes WHERE issue_id = ?').run(req.params.id);
+    db.prepare('DELETE FROM attachments WHERE issue_id = ?').run(req.params.id);
+    db.prepare('DELETE FROM messages WHERE issue_id = ?').run(req.params.id);
+    db.prepare('DELETE FROM activity_log WHERE issue_id = ?').run(req.params.id);
+    try { db.prepare('DELETE FROM quotes WHERE issue_id = ?').run(req.params.id); } catch(e) {}
+    try { db.prepare('DELETE FROM email_sync_log WHERE issue_id = ?').run(req.params.id); } catch(e) {}
+
+    // Delete the issue itself
+    db.prepare('DELETE FROM issues WHERE id = ?').run(req.params.id);
+    console.log(`[Issues] Deleted issue ${issue.uuid} (id:${issue.id}) by ${req.user.name}`);
+    res.json({ success: true, uuid: issue.uuid });
+  } finally { db.close(); }
+});
+
 router.post('/:id/respond', authenticate, async (req, res) => {
   const { message } = req.body;
   if (!message) return res.status(400).json({ error: 'Message required' });

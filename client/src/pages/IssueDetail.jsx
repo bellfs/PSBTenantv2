@@ -1,13 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { api } from '../utils/api';
-import { ArrowLeft, Send, FileText, StickyNote, Clock, AlertCircle, Image, HardHat, Copy, Check, X } from 'lucide-react';
+import { ArrowLeft, Send, FileText, StickyNote, Clock, AlertCircle, Image, HardHat, Copy, Check, X, Trash2 } from 'lucide-react';
 
 export default function IssueDetail() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [reply, setReply] = useState('');
   const [sending, setSending] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [ef, setEf] = useState({});
   const [saving, setSaving] = useState(false);
   const [report, setReport] = useState(null);
@@ -80,6 +83,18 @@ ${report.issue.attended_by ? 'Attended By: ' + report.issue.attended_by : ''}
     finally { setAddingNote(false); }
   };
 
+  const handleDelete = async () => {
+    setDeleting(true);
+    try {
+      await api.deleteIssue(id);
+      navigate('/issues');
+    } catch (e) {
+      alert('Failed to delete issue: ' + e.message);
+      setDeleting(false);
+      setShowDeleteConfirm(false);
+    }
+  };
+
   const photos = attachments?.filter(a => a.file_type?.startsWith('image')) || [];
 
   // SLA calculations
@@ -90,7 +105,30 @@ ${report.issue.attended_by ? 'Attended By: ' + report.issue.attended_by : ''}
 
   return (
     <div className="fade-in">
-      <div style={{marginBottom:20}}><Link to="/issues" className="btn btn-ghost btn-sm"><ArrowLeft size={15}/> Back</Link></div>
+      <div style={{marginBottom:20,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+        <Link to="/issues" className="btn btn-ghost btn-sm"><ArrowLeft size={15}/> Back</Link>
+        <button className="btn btn-danger btn-sm" onClick={()=>setShowDeleteConfirm(true)} style={{display:'flex',alignItems:'center',gap:4}}><Trash2 size={14}/> Delete Issue</button>
+      </div>
+
+      {/* Delete confirmation modal */}
+      {showDeleteConfirm && (
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.6)',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center'}} onClick={()=>setShowDeleteConfirm(false)}>
+          <div style={{background:'var(--bg-card)',borderRadius:12,padding:24,maxWidth:400,width:'90%',border:'1px solid var(--border-light)'}} onClick={e=>e.stopPropagation()}>
+            <h3 style={{margin:'0 0 8px',color:'var(--text-primary)'}}>Delete Issue?</h3>
+            <p style={{fontSize:13,color:'var(--text-secondary)',margin:'0 0 8px'}}>
+              This will permanently delete issue <strong>{issue.uuid}</strong> ({issue.title}) and all associated messages, photos, notes, and activity logs.
+            </p>
+            <p style={{fontSize:12,color:'#ef4444',margin:'0 0 20px'}}>This action cannot be undone.</p>
+            <div style={{display:'flex',gap:8,justifyContent:'flex-end'}}>
+              <button className="btn btn-ghost btn-sm" onClick={()=>setShowDeleteConfirm(false)} disabled={deleting}>Cancel</button>
+              <button className="btn btn-danger btn-sm" onClick={handleDelete} disabled={deleting} style={{display:'flex',alignItems:'center',gap:4}}>
+                <Trash2 size={14}/> {deleting ? 'Deleting...' : 'Delete Permanently'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="page-header">
         <h2>{issue.title}</h2>
         <p>Ref: {issue.uuid} . <Link to={`/tenants/${issue.tenant_id_ref}`} style={{color:'var(--accent-light)'}}>{issue.tenant_name}</Link> . {issue.property_name}{issue.tenant_flat ? ' . '+issue.tenant_flat : ''}</p>

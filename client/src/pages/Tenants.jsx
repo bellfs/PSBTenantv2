@@ -1,13 +1,15 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../utils/api';
-import { Search, Mail, Phone, MessageCircle } from 'lucide-react';
+import { Search, Mail, Phone, MessageCircle, ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react';
 
 export default function Tenants() {
   const [tenants, setTenants] = useState([]);
   const [year, setYear] = useState('');
   const [search, setSearch] = useState('');
   const [filtered, setFiltered] = useState([]);
+  const [sortCol, setSortCol] = useState('name');
+  const [sortDir, setSortDir] = useState('asc');
 
   useEffect(() => {
     api.getTenants(year || undefined).then(setTenants);
@@ -23,6 +25,46 @@ export default function Tenants() {
       t.property_name?.toLowerCase().includes(q)
     ));
   }, [search, tenants]);
+
+  const sorted = useMemo(() => {
+    const list = [...filtered];
+    const dir = sortDir === 'asc' ? 1 : -1;
+    list.sort((a, b) => {
+      let va = '', vb = '';
+      switch (sortCol) {
+        case 'name': va = (a.name || '').toLowerCase(); vb = (b.name || '').toLowerCase(); break;
+        case 'property': va = (a.property_name || '').toLowerCase(); vb = (b.property_name || '').toLowerCase(); break;
+        case 'flat': va = (a.flat_number || '').toLowerCase(); vb = (b.flat_number || '').toLowerCase(); break;
+        case 'year': va = a.academic_year || ''; vb = b.academic_year || ''; break;
+        case 'open': va = a.open_issues || 0; vb = b.open_issues || 0; return (va - vb) * dir;
+        case 'total': va = a.total_issues || 0; vb = b.total_issues || 0; return (va - vb) * dir;
+        case 'spend': va = Number(a.total_spend || 0); vb = Number(b.total_spend || 0); return (va - vb) * dir;
+        default: va = (a.name || '').toLowerCase(); vb = (b.name || '').toLowerCase();
+      }
+      if (va < vb) return -1 * dir;
+      if (va > vb) return 1 * dir;
+      return 0;
+    });
+    return list;
+  }, [filtered, sortCol, sortDir]);
+
+  const toggleSort = (col) => {
+    if (sortCol === col) {
+      setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortCol(col);
+      setSortDir('asc');
+    }
+  };
+
+  const SortIcon = ({ col }) => {
+    if (sortCol !== col) return <ChevronsUpDown size={12} style={{opacity:0.3,marginLeft:4,verticalAlign:'middle'}}/>;
+    return sortDir === 'asc'
+      ? <ChevronUp size={12} style={{marginLeft:4,verticalAlign:'middle',color:'var(--accent-light)'}}/>
+      : <ChevronDown size={12} style={{marginLeft:4,verticalAlign:'middle',color:'var(--accent-light)'}}/>;
+  };
+
+  const thStyle = { cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' };
 
   const displayPhone = (p) => {
     if (!p) return '';
@@ -48,9 +90,16 @@ export default function Tenants() {
       </div>
 
       <div className="card"><div className="table-container"><table><thead><tr>
-        <th>Name</th><th>Property</th><th>Flat</th><th>Contact</th><th>Year</th><th>Open</th><th>Total</th><th>Spend</th>
+        <th style={thStyle} onClick={()=>toggleSort('name')}>Name <SortIcon col="name"/></th>
+        <th style={thStyle} onClick={()=>toggleSort('property')}>Property <SortIcon col="property"/></th>
+        <th style={thStyle} onClick={()=>toggleSort('flat')}>Flat <SortIcon col="flat"/></th>
+        <th>Contact</th>
+        <th style={thStyle} onClick={()=>toggleSort('year')}>Year <SortIcon col="year"/></th>
+        <th style={thStyle} onClick={()=>toggleSort('open')}>Open <SortIcon col="open"/></th>
+        <th style={thStyle} onClick={()=>toggleSort('total')}>Total <SortIcon col="total"/></th>
+        <th style={thStyle} onClick={()=>toggleSort('spend')}>Spend <SortIcon col="spend"/></th>
       </tr></thead><tbody>
-        {filtered.map(t => (
+        {sorted.map(t => (
           <tr key={t.id}>
             <td>
               <Link to={`/tenants/${t.id}`} style={{color:'var(--accent-light)',textDecoration:'none',fontWeight:500}}>{t.name}</Link>
@@ -71,7 +120,7 @@ export default function Tenants() {
             <td>{t.total_spend ? '\u00a3'+Number(t.total_spend).toFixed(0) : '\u00a30'}</td>
           </tr>
         ))}
-        {filtered.length === 0 && <tr><td colSpan={8} style={{textAlign:'center',color:'var(--text-muted)',padding:40}}>No tenants found</td></tr>}
+        {sorted.length === 0 && <tr><td colSpan={8} style={{textAlign:'center',color:'var(--text-muted)',padding:40}}>No tenants found</td></tr>}
       </tbody></table></div></div>
     </div>
   );

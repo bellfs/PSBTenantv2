@@ -235,15 +235,9 @@ async function initialiseDatabase() {
       ['Claypath Flat 4','Claypath Flat 4, Durham','DH1 1QT',1],['35 St Andrews Court','35 St Andrews Court, Durham','DH1',1],
       ['7 Cathedrals','7 Cathedrals, Durham','DH1',1],['2 St Margarets Mews','2 St Margarets Mews, Durham','DH1',1],
       ['24 Hallgarth Street','24 Hallgarth Street, Durham','DH1 3AT',1],
-      ['Markhim','Markhim, Durham','DH1',1],
     ]) { db.prepare('INSERT INTO properties (name, address, postcode, num_units) VALUES (?, ?, ?, ?)').run(n,a,p,u); }
     console.log('  Properties seeded');
   }
-  // Ensure Markhim exists even if properties were seeded before
-  if (!db.prepare("SELECT id FROM properties WHERE name = 'Markhim'").get()) {
-    db.prepare('INSERT INTO properties (name, address, postcode, num_units) VALUES (?, ?, ?, ?)').run('Markhim','Markhim, Durham','DH1',1);
-  }
-
   // Seed contractors
   if (!db.prepare("SELECT id FROM contractors WHERE name = 'Tony the Plumber'").get()) {
     for (const [name, trade, notes] of [
@@ -284,7 +278,6 @@ const PROP_MAP = {
   'Claypath Flat 3': 'Claypath Flat 3',
   'Claypath Flat 4': 'Claypath Flat 4',
   '35 St Andrews Court': '35 St Andrews Court',
-  'Markhim': 'Markhim',
   '7 Cathedrals': '7 Cathedrals',
   '24 Hallgarth Street': '24 Hallgarth Street',
 };
@@ -367,7 +360,7 @@ function seedTenants(db) {
     ['Claypath Flat 4','Luke Palmer','','lukewenjie@icloud.com','07570 088423',165,715],
     ['Claypath Flat 4','Henry Richardson','','henry.richardson.farm@gmail.com','07432 691330',165,715],
     ['35 St Andrews Court','Mingtong Wei','','m18610465852@163.com','07901 198460',0,0],
-    ['Markhim','Yuxin Yan','','13290695118@163.com','07303 091864',0,0],
+    ['35 St Andrews Court','Yuxin Yan','','13290695118@163.com','07303 091864',0,0],
     ['7 Cathedrals','Nuo Xu','','xun377375@gmail.com','07776 269327',0,0],
     ['24 Hallgarth Street','Ashley Wright','','wrightsclan2@gmail.com','07759 077416',0,0],
     ['24 Hallgarth Street','Karan Wright','','wrightsclan@icloud.com','07522 859026',0,0],
