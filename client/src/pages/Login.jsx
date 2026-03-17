@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../App';
-import { Wrench } from 'lucide-react';
+import { Wrench, ArrowRight } from 'lucide-react';
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -17,14 +17,36 @@ export default function Login() {
   return (
     <div className="login-page">
       <div className="login-card">
-        <div style={{ textAlign: 'center', marginBottom: 24 }}><Wrench size={28} style={{ color: 'var(--accent)', marginBottom: 12 }} /></div>
-        <h1>PSB Maintenance Hub</h1>
-        <p>Sign in to manage property maintenance</p>
+        <div style={{ textAlign: 'center', marginBottom: 28 }}>
+          <div style={{
+            width: 56,
+            height: 56,
+            borderRadius: 14,
+            background: 'var(--gradient-accent)',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            marginBottom: 16,
+            boxShadow: '0 4px 20px rgba(99,102,241,0.3)'
+          }}>
+            <Wrench size={28} style={{ color: 'white' }} />
+          </div>
+        </div>
+        <h1 style={{ textAlign: 'center' }}>PSB Maintenance Hub</h1>
+        <p style={{ textAlign: 'center' }}>Sign in to manage property maintenance</p>
         {error && <div className="login-error">{error}</div>}
         <form onSubmit={handleSubmit}>
-          <div className="form-group"><label className="form-label">Email</label><input className="form-input" type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="your@email.com" required /></div>
-          <div className="form-group"><label className="form-label">Password</label><input className="form-input" type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Password" required /></div>
-          <button className="btn btn-primary btn-lg" type="submit" style={{ width: '100%', marginTop: 8 }} disabled={loading}>{loading ? 'Signing in...' : 'Sign In'}</button>
+          <div className="form-group">
+            <label className="form-label">Email</label>
+            <input className="form-input" type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="your@email.com" required />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Password</label>
+            <input className="form-input" type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Password" required />
+          </div>
+          <button className="btn btn-primary btn-lg" type="submit" style={{ width: '100%', marginTop: 8, justifyContent: 'center' }} disabled={loading}>
+            {loading ? 'Signing in...' : <>Sign In <ArrowRight size={16} /></>}
+          </button>
         </form>
       </div>
     </div>

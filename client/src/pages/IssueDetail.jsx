@@ -112,8 +112,8 @@ ${report.issue.attended_by ? 'Attended By: ' + report.issue.attended_by : ''}
 
       {/* Delete confirmation modal */}
       {showDeleteConfirm && (
-        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.6)',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center'}} onClick={()=>setShowDeleteConfirm(false)}>
-          <div style={{background:'var(--bg-card)',borderRadius:12,padding:24,maxWidth:400,width:'90%',border:'1px solid var(--border-light)'}} onClick={e=>e.stopPropagation()}>
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.6)',backdropFilter:'blur(4px)',WebkitBackdropFilter:'blur(4px)',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center'}} onClick={()=>setShowDeleteConfirm(false)}>
+          <div style={{background:'var(--gradient-card)',backdropFilter:'var(--glass-blur)',WebkitBackdropFilter:'var(--glass-blur)',borderRadius:'var(--radius-lg)',padding:28,maxWidth:400,width:'90%',border:'var(--glass-border)',boxShadow:'var(--shadow-lg)'}} onClick={e=>e.stopPropagation()}>
             <h3 style={{margin:'0 0 8px',color:'var(--text-primary)'}}>Delete Issue?</h3>
             <p style={{fontSize:13,color:'var(--text-secondary)',margin:'0 0 8px'}}>
               This will permanently delete issue <strong>{issue.uuid}</strong> ({issue.title}) and all associated messages, photos, notes, and activity logs.

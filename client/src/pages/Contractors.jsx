@@ -39,11 +39,11 @@ export default function Contractors() {
   if (!contractors) return <div style={{padding:40,textAlign:'center'}}><div className="loading-spinner" style={{margin:'0 auto'}}/></div>;
 
   return (
-    <div>
-      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:20}}>
-        <div>
-          <h2 style={{fontSize:20,fontWeight:600,marginBottom:4}}>Contractors</h2>
-          <p style={{fontSize:13,color:'var(--text-secondary)'}}>Manage your contractor network and view their job history</p>
+    <div className="fade-in">
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:20,flexWrap:'wrap',gap:12}}>
+        <div className="page-header" style={{marginBottom:0}}>
+          <h2>Contractors</h2>
+          <p>Manage your contractor network and view their job history</p>
         </div>
         {user?.role === 'admin' && (
           <button className="btn btn-primary" onClick={() => { setEditing(null); setForm({ name:'', trade:'plumbing', phone:'', email:'', notes:'' }); setShowForm(true); }}>

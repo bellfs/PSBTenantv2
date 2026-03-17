@@ -135,21 +135,49 @@ export default function Compliance() {
         <div>
           {/* Summary Cards */}
           <div className="stats-grid" style={{marginBottom:20}}>
-            <div className="stat-card">
-              <div className="stat-label">Total Certificates</div>
-              <div className="stat-value">{summary.total}</div>
+            <div className="stat-card accent">
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',position:'relative'}}>
+                <div>
+                  <div className="stat-card-label">Total Certificates</div>
+                  <div className="stat-card-value">{summary.total}</div>
+                </div>
+                <div style={{width:40,height:40,borderRadius:10,background:'rgba(99,102,241,0.12)',display:'flex',alignItems:'center',justifyContent:'center'}}>
+                  <ShieldCheck size={20} style={{color:'var(--accent-light)'}}/>
+                </div>
+              </div>
             </div>
             <div className="stat-card" style={{borderLeft:'3px solid #10b981'}}>
-              <div className="stat-label">Valid</div>
-              <div className="stat-value" style={{color:'#10b981'}}>{summary.valid}</div>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',position:'relative'}}>
+                <div>
+                  <div className="stat-card-label">Valid</div>
+                  <div className="stat-card-value" style={{color:'#10b981'}}>{summary.valid}</div>
+                </div>
+                <div style={{width:40,height:40,borderRadius:10,background:'rgba(16,185,129,0.12)',display:'flex',alignItems:'center',justifyContent:'center'}}>
+                  <CheckCircle size={20} style={{color:'#10b981'}}/>
+                </div>
+              </div>
             </div>
             <div className="stat-card" style={{borderLeft:'3px solid #f59e0b'}}>
-              <div className="stat-label">Expiring Soon</div>
-              <div className="stat-value" style={{color:'#f59e0b'}}>{summary.expiring_soon}</div>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',position:'relative'}}>
+                <div>
+                  <div className="stat-card-label">Expiring Soon</div>
+                  <div className="stat-card-value" style={{color:'#f59e0b'}}>{summary.expiring_soon}</div>
+                </div>
+                <div style={{width:40,height:40,borderRadius:10,background:'rgba(245,158,11,0.12)',display:'flex',alignItems:'center',justifyContent:'center'}}>
+                  <AlertTriangle size={20} style={{color:'#f59e0b'}}/>
+                </div>
+              </div>
             </div>
             <div className="stat-card" style={{borderLeft:'3px solid #ef4444'}}>
-              <div className="stat-label">Expired</div>
-              <div className="stat-value" style={{color:'#ef4444'}}>{summary.expired}</div>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',position:'relative'}}>
+                <div>
+                  <div className="stat-card-label">Expired</div>
+                  <div className="stat-card-value" style={{color:'#ef4444'}}>{summary.expired}</div>
+                </div>
+                <div style={{width:40,height:40,borderRadius:10,background:'rgba(239,68,68,0.12)',display:'flex',alignItems:'center',justifyContent:'center'}}>
+                  <XCircle size={20} style={{color:'#ef4444'}}/>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -307,8 +335,8 @@ export default function Compliance() {
 
       {/* Add Certificate Modal */}
       {showAddCert && (
-        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.6)',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center'}} onClick={()=>setShowAddCert(false)}>
-          <div style={{background:'var(--bg-card)',borderRadius:12,padding:24,maxWidth:500,width:'90%',border:'1px solid var(--border-light)',maxHeight:'90vh',overflowY:'auto'}} onClick={e=>e.stopPropagation()}>
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.6)',backdropFilter:'blur(4px)',WebkitBackdropFilter:'blur(4px)',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center'}} onClick={()=>setShowAddCert(false)}>
+          <div style={{background:'var(--gradient-card)',backdropFilter:'var(--glass-blur)',WebkitBackdropFilter:'var(--glass-blur)',borderRadius:'var(--radius-lg)',padding:28,maxWidth:500,width:'90%',border:'var(--glass-border)',maxHeight:'90vh',overflowY:'auto',boxShadow:'var(--shadow-lg)'}} onClick={e=>e.stopPropagation()}>
             <h3 style={{margin:'0 0 16px'}}>Add Compliance Certificate</h3>
             <div className="form-group">
               <label className="form-label">Property *</label>
@@ -355,8 +383,8 @@ export default function Compliance() {
 
       {/* Upload Document Modal */}
       {showUploadDoc && (
-        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.6)',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center'}} onClick={()=>setShowUploadDoc(false)}>
-          <div style={{background:'var(--bg-card)',borderRadius:12,padding:24,maxWidth:500,width:'90%',border:'1px solid var(--border-light)',maxHeight:'90vh',overflowY:'auto'}} onClick={e=>e.stopPropagation()}>
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.6)',backdropFilter:'blur(4px)',WebkitBackdropFilter:'blur(4px)',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center'}} onClick={()=>setShowUploadDoc(false)}>
+          <div style={{background:'var(--gradient-card)',backdropFilter:'var(--glass-blur)',WebkitBackdropFilter:'var(--glass-blur)',borderRadius:'var(--radius-lg)',padding:28,maxWidth:500,width:'90%',border:'var(--glass-border)',maxHeight:'90vh',overflowY:'auto',boxShadow:'var(--shadow-lg)'}} onClick={e=>e.stopPropagation()}>
             <h3 style={{margin:'0 0 16px'}}>Upload Document</h3>
             <div className="form-group">
               <label className="form-label">File *</label>

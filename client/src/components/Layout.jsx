@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../App';
-import { LayoutDashboard, AlertCircle, Building2, Users, Settings, LogOut, Wrench, BarChart3, Menu, X, HardHat, ShieldCheck } from 'lucide-react';
+import { LayoutDashboard, AlertCircle, Building2, Users, Settings, LogOut, Wrench, BarChart3, Menu, X, HardHat, ShieldCheck, ChevronRight } from 'lucide-react';
 
 export default function Layout() {
   const { user, logout } = useAuth();
@@ -33,22 +33,52 @@ export default function Layout() {
     </>
   );
 
+  const sidebarBrand = (
+    <div className="sidebar-brand">
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div style={{
+          width: 32,
+          height: 32,
+          borderRadius: 8,
+          background: 'var(--gradient-accent)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          boxShadow: '0 2px 8px rgba(99,102,241,0.3)',
+          flexShrink: 0
+        }}>
+          <Wrench size={16} style={{ color: 'white' }} />
+        </div>
+        <div>
+          <h1>PSB Maintenance</h1>
+          <span>Property Management Hub</span>
+        </div>
+      </div>
+    </div>
+  );
+
+  const userFooter = (
+    <div className="sidebar-footer">
+      <div className="sidebar-user">
+        <div className="sidebar-user-avatar">{initials}</div>
+        <div className="sidebar-user-info">
+          <div className="sidebar-user-name">{user?.name}</div>
+          <div className="sidebar-user-role">{user?.role}</div>
+        </div>
+        <button className="btn btn-ghost btn-sm" onClick={handleLogout} title="Log out" style={{ color: 'var(--text-muted)' }}>
+          <LogOut size={15} />
+        </button>
+      </div>
+    </div>
+  );
+
   return (
     <div className="app-layout">
       {/* Desktop sidebar */}
       <aside className="sidebar sidebar-desktop">
-        <div className="sidebar-brand">
-          <h1><Wrench size={15} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 6, opacity: 0.6 }} />PSB Maintenance</h1>
-          <span>Property Management Hub</span>
-        </div>
+        {sidebarBrand}
         <nav className="sidebar-nav">{navLinks}</nav>
-        <div className="sidebar-footer">
-          <div className="sidebar-user">
-            <div className="sidebar-user-avatar">{initials}</div>
-            <div className="sidebar-user-info"><div className="sidebar-user-name">{user?.name}</div><div className="sidebar-user-role">{user?.role}</div></div>
-            <button className="btn btn-ghost btn-sm" onClick={handleLogout} title="Log out"><LogOut size={15} /></button>
-          </div>
-        </div>
+        {userFooter}
       </aside>
 
       {/* Mobile header */}
@@ -56,7 +86,22 @@ export default function Layout() {
         <button className="mobile-menu-btn" onClick={() => setMobileOpen(true)}>
           <Menu size={22} />
         </button>
-        <h1 className="mobile-header-title"><Wrench size={14} style={{ opacity: 0.6 }} /> PSB Maintenance</h1>
+        <h1 className="mobile-header-title">
+          <div style={{
+            width: 24,
+            height: 24,
+            borderRadius: 6,
+            background: 'var(--gradient-accent)',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            marginRight: 6,
+            verticalAlign: 'middle'
+          }}>
+            <Wrench size={12} style={{ color: 'white' }} />
+          </div>
+          PSB Maintenance
+        </h1>
         <div className="sidebar-user-avatar" style={{ width: 28, height: 28, fontSize: 11 }}>{initials}</div>
       </div>
 
@@ -64,20 +109,28 @@ export default function Layout() {
       {mobileOpen && <div className="mobile-overlay" onClick={() => setMobileOpen(false)} />}
       <aside className={`sidebar sidebar-mobile ${mobileOpen ? 'open' : ''}`}>
         <div className="sidebar-brand" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div>
-            <h1><Wrench size={15} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 6, opacity: 0.6 }} />PSB Maintenance</h1>
-            <span>Property Management Hub</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{
+              width: 32,
+              height: 32,
+              borderRadius: 8,
+              background: 'var(--gradient-accent)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0
+            }}>
+              <Wrench size={16} style={{ color: 'white' }} />
+            </div>
+            <div>
+              <h1>PSB Maintenance</h1>
+              <span>Property Management Hub</span>
+            </div>
           </div>
           <button className="mobile-menu-btn" onClick={() => setMobileOpen(false)}><X size={20} /></button>
         </div>
         <nav className="sidebar-nav">{navLinks}</nav>
-        <div className="sidebar-footer">
-          <div className="sidebar-user">
-            <div className="sidebar-user-avatar">{initials}</div>
-            <div className="sidebar-user-info"><div className="sidebar-user-name">{user?.name}</div><div className="sidebar-user-role">{user?.role}</div></div>
-            <button className="btn btn-ghost btn-sm" onClick={handleLogout} title="Log out"><LogOut size={15} /></button>
-          </div>
-        </div>
+        {userFooter}
       </aside>
 
       <main className="main-content"><Outlet /></main>
