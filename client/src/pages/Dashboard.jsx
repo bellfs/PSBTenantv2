@@ -1,16 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../utils/api';
-import { AlertCircle, Clock, CheckCircle, AlertTriangle, Zap, Users } from 'lucide-react';
+import { AlertCircle, Clock, CheckCircle, AlertTriangle, Zap, Users, ShieldCheck, XCircle } from 'lucide-react';
 
 export default function Dashboard() {
   const [stats, setStats] = useState(null);
   const [sla, setSla] = useState(null);
   const [budgets, setBudgets] = useState(null);
+  const [compliance, setCompliance] = useState(null);
   useEffect(() => {
     api.getIssueStats().then(setStats);
     api.getSlaMetrics().then(setSla).catch(() => {});
     api.getBudgets().then(setBudgets).catch(() => {});
+    api.getComplianceSummary().then(setCompliance).catch(() => {});
   }, []);
   if (!stats) return <div style={{ padding: 40, textAlign: 'center' }}><div className="loading-spinner" style={{ margin: '0 auto' }} /></div>;
 
@@ -68,6 +70,19 @@ export default function Dashboard() {
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Compliance alerts */}
+      {compliance && (compliance.expired > 0 || compliance.expiring_soon > 0) && (
+        <div style={{background: compliance.expired > 0 ? 'var(--danger-subtle)' : 'rgba(245,158,11,0.08)',border:`1px solid ${compliance.expired > 0 ? 'rgba(239,68,68,0.3)' : 'rgba(245,158,11,0.3)'}`,borderRadius:8,padding:'12px 16px',marginBottom:16,display:'flex',alignItems:'center',gap:10}}>
+          {compliance.expired > 0 ? <XCircle size={18} style={{color:'var(--danger)',flexShrink:0}}/> : <AlertTriangle size={18} style={{color:'#f59e0b',flexShrink:0}}/>}
+          <span style={{fontSize:13,color:'var(--text-primary)'}}>
+            {compliance.expired > 0 && <strong>{compliance.expired} expired certificate{compliance.expired > 1 ? 's' : ''}</strong>}
+            {compliance.expired > 0 && compliance.expiring_soon > 0 && ' and '}
+            {compliance.expiring_soon > 0 && <span>{compliance.expiring_soon} certificate{compliance.expiring_soon > 1 ? 's' : ''} expiring within 30 days</span>}
+          </span>
+          <Link to="/compliance" style={{marginLeft:'auto',fontSize:12,color:'var(--accent-light)',whiteSpace:'nowrap'}}>View Compliance</Link>
         </div>
       )}
 

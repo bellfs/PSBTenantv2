@@ -164,9 +164,34 @@ async function initialiseDatabase() {
     FOREIGN KEY (email_account_id) REFERENCES email_accounts(id)
   )`);
 
+  db.exec(`CREATE TABLE IF NOT EXISTS compliance_certificates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, property_id INTEGER NOT NULL,
+    cert_type TEXT NOT NULL, certificate_number TEXT,
+    issued_date DATE, expiry_date DATE,
+    status TEXT DEFAULT 'valid', provider TEXT, notes TEXT,
+    document_id INTEGER, reminder_sent INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (property_id) REFERENCES properties(id)
+  )`);
+
+  db.exec(`CREATE TABLE IF NOT EXISTS documents (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    property_id INTEGER, tenant_id INTEGER,
+    category TEXT NOT NULL, name TEXT NOT NULL,
+    file_path TEXT NOT NULL, file_type TEXT, file_size INTEGER,
+    uploaded_by TEXT, notes TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (property_id) REFERENCES properties(id),
+    FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+  )`);
+
   db.exec('CREATE INDEX IF NOT EXISTS idx_tenancies_tenant ON tenancies(tenant_id)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_tenancies_property ON tenancies(property_id)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_tenancies_year ON tenancies(academic_year)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_compliance_property ON compliance_certificates(property_id)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_compliance_expiry ON compliance_certificates(expiry_date)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_documents_property ON documents(property_id)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_documents_tenant ON documents(tenant_id)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_tenants_email ON tenants(email)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_email_sync_msg ON email_sync_log(message_id)');
 

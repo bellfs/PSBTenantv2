@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { api } from '../utils/api';
-import { ArrowLeft, Download, Home, User, Mail, Phone } from 'lucide-react';
+import { ArrowLeft, Download, Home, User, Mail, Phone, ShieldCheck, CheckCircle, AlertTriangle, XCircle } from 'lucide-react';
 import { useAuth } from '../App';
 
 export default function PropertyDetail() {
@@ -12,11 +12,13 @@ export default function PropertyDetail() {
   const [editBudget, setEditBudget] = useState(false);
   const [budgetVal, setBudgetVal] = useState('');
   const [apartments, setApartments] = useState([]);
+  const [certs, setCerts] = useState([]);
   const year = new Date().getFullYear();
 
   useEffect(() => {
     api.getPropertyIssues(id).then(setData);
     api.getPropertyApartments(id).then(setApartments).catch(() => {});
+    api.getCertificates({ property_id: id }).then(setCerts).catch(() => {});
     api.getBudgets(year).then(b => {
       const pb = b.budgets.find(x => x.property_id === parseInt(id));
       setBudget(pb || { annual_budget: 0, actual_spend: 0 });
@@ -128,6 +130,33 @@ export default function PropertyDetail() {
           </div>
         );
       })()}
+
+      {/* Compliance Certificates */}
+      {certs.length > 0 && (
+        <div className="card" style={{marginBottom:16}}>
+          <div className="card-header"><h3><ShieldCheck size={16} style={{verticalAlign:'middle',marginRight:6}}/>Compliance Certificates ({certs.length})</h3></div>
+          <div className="card-body">
+            <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(220px,1fr))',gap:10}}>
+              {certs.map(c => {
+                const days = c.expiry_date ? Math.ceil((new Date(c.expiry_date) - Date.now()) / 86400000) : null;
+                const icon = days === null ? <CheckCircle size={14} color="var(--text-muted)"/> : days < 0 ? <XCircle size={14} color="#ef4444"/> : days <= 30 ? <AlertTriangle size={14} color="#f59e0b"/> : <CheckCircle size={14} color="#10b981"/>;
+                return (
+                  <div key={c.id} style={{padding:10,borderRadius:6,border:'1px solid var(--border-light)',background:'var(--bg-secondary)'}}>
+                    <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:4}}>
+                      {icon}
+                      <span style={{fontWeight:500,fontSize:13}}>{c.cert_type === 'gas_safety' ? 'Gas Safety' : c.cert_type === 'epc' ? 'EPC' : c.cert_type === 'eicr' ? 'EICR' : c.cert_type.replace(/_/g,' ')}</span>
+                    </div>
+                    <div style={{fontSize:11,color:'var(--text-muted)'}}>
+                      {c.expiry_date ? `Expires: ${fmt(c.expiry_date)}` : 'No expiry set'}
+                      {c.provider && ` \u00b7 ${c.provider}`}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="card"><div className="card-header"><h3>All Issues ({issues.length})</h3></div>
         <div className="table-container"><table><thead><tr><th>Ref</th><th>Issue</th><th>Tenant</th><th>Flat</th><th>Category</th><th>Status</th><th>Priority</th><th>Est. Cost</th><th>Final Cost</th><th>Reported</th><th>Resolved</th></tr></thead><tbody>

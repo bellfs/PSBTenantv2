@@ -80,6 +80,28 @@ export const api = {
   getBudgets: (year) => request(`/budgets?year=${year || new Date().getFullYear()}`),
   setBudget: (data) => request('/budgets', { method: 'PUT', body: JSON.stringify(data) }),
 
+  // Compliance & Documents
+  getCertificates: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return request(`/compliance/certificates${qs ? '?' + qs : ''}`);
+  },
+  getComplianceSummary: () => request('/compliance/summary'),
+  createCertificate: (data) => request('/compliance/certificates', { method: 'POST', body: JSON.stringify(data) }),
+  updateCertificate: (id, data) => request(`/compliance/certificates/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteCertificate: (id) => request(`/compliance/certificates/${id}`, { method: 'DELETE' }),
+  getDocuments: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return request(`/compliance/documents${qs ? '?' + qs : ''}`);
+  },
+  uploadDocument: (formData) => {
+    const token = localStorage.getItem('psb_token');
+    return fetch(`${API_BASE}/compliance/documents`, {
+      method: 'POST', body: formData,
+      headers: { ...(token ? { 'Authorization': `Bearer ${token}` } : {}) }
+    }).then(r => { if (!r.ok) throw new Error('Upload failed'); return r.json(); });
+  },
+  deleteDocument: (id) => request(`/compliance/documents/${id}`, { method: 'DELETE' }),
+
   // Email accounts
   getEmailAccounts: () => request('/email/accounts'),
   getGmailAuthUrl: () => request('/email/accounts/gmail/auth-url', { method: 'POST' }),
