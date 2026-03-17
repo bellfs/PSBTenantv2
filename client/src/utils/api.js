@@ -50,10 +50,12 @@ export const api = {
   updateProperty: (id, data) => request(`/properties/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   exportPropertyIssues: (id) => downloadFile(`/properties/${id}/export`, 'property-issues.csv'),
 
-  getTenants: () => request('/tenants'),
+  getTenants: (year) => request(`/tenants${year ? `?year=${year}` : ''}`),
+  searchTenants: (q) => request(`/tenants/search?q=${encodeURIComponent(q)}`),
   getTenantIssues: (id) => request(`/tenants/${id}/issues`),
   updateTenant: (id, data) => request(`/tenants/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   exportTenantIssues: (id) => downloadFile(`/tenants/${id}/export`, 'tenant-issues.csv'),
+  getPropertyApartments: (id) => request(`/properties/${id}/apartments`),
 
   getAnalytics: () => request('/analytics'),
   exportAllIssues: () => downloadFile('/analytics/export', 'maintenance-export.csv'),
@@ -76,4 +78,13 @@ export const api = {
   // Budgets
   getBudgets: (year) => request(`/budgets?year=${year || new Date().getFullYear()}`),
   setBudget: (data) => request('/budgets', { method: 'PUT', body: JSON.stringify(data) }),
+
+  // Email accounts
+  getEmailAccounts: () => request('/email/accounts'),
+  getGmailAuthUrl: () => request('/email/accounts/gmail/auth-url', { method: 'POST' }),
+  addImapAccount: (data) => request('/email/accounts/imap', { method: 'POST', body: JSON.stringify(data) }),
+  toggleEmailAccount: (id, enabled) => request(`/email/accounts/${id}`, { method: 'PUT', body: JSON.stringify({ sync_enabled: enabled }) }),
+  deleteEmailAccount: (id) => request(`/email/accounts/${id}`, { method: 'DELETE' }),
+  triggerEmailSync: (id) => request(`/email/accounts/${id}/sync`, { method: 'POST' }),
+  getEmailSyncLog: () => request('/email/sync-log'),
 };

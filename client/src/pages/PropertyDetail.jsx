@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { api } from '../utils/api';
-import { ArrowLeft, Download } from 'lucide-react';
+import { ArrowLeft, Download, Home, User, Mail, Phone } from 'lucide-react';
 import { useAuth } from '../App';
 
 export default function PropertyDetail() {
@@ -11,10 +11,12 @@ export default function PropertyDetail() {
   const [budget, setBudget] = useState(null);
   const [editBudget, setEditBudget] = useState(false);
   const [budgetVal, setBudgetVal] = useState('');
+  const [apartments, setApartments] = useState([]);
   const year = new Date().getFullYear();
 
   useEffect(() => {
     api.getPropertyIssues(id).then(setData);
+    api.getPropertyApartments(id).then(setApartments).catch(() => {});
     api.getBudgets(year).then(b => {
       const pb = b.budgets.find(x => x.property_id === parseInt(id));
       setBudget(pb || { annual_budget: 0, actual_spend: 0 });
@@ -77,6 +79,55 @@ export default function PropertyDetail() {
           </div>
         </div>
       )}
+
+      {/* Apartment Grid (for multi-unit properties like 52 Old Elvet) */}
+      {apartments.length > 0 && (() => {
+        // Group tenants by apartment
+        const aptMap = {};
+        const APT_ORDER = ['The Villiers','The Barrington','The Egerton','The Wolsey','The Tunstall','The Montague','The Morton','The Gray','The Langley','The Kirkham','The Fordham','The Talbot Penthouse'];
+        apartments.forEach(a => {
+          if (!aptMap[a.apartment]) aptMap[a.apartment] = [];
+          aptMap[a.apartment].push(a);
+        });
+        // Order apartments: known order first, then alphabetical
+        const allApts = [...new Set([...APT_ORDER.filter(a => aptMap[a]), ...Object.keys(aptMap).filter(a => !APT_ORDER.includes(a))])];
+        // Add known empty apartments
+        APT_ORDER.forEach(a => { if (!aptMap[a] && property.name === '52 Old Elvet') allApts.push(a); });
+
+        return (
+          <div className="card" style={{marginBottom:16}}>
+            <div className="card-header"><h3><Home size={16} style={{verticalAlign:'middle',marginRight:6}}/>Apartments ({allApts.length})</h3></div>
+            <div className="card-body">
+              <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(280px,1fr))',gap:12}}>
+                {[...new Set(allApts)].map(apt => {
+                  const tenants = aptMap[apt] || [];
+                  const vacant = tenants.length === 0;
+                  return (
+                    <div key={apt} style={{border:'1px solid var(--border)',borderRadius:8,padding:14,background: vacant ? 'var(--bg-input)' : 'var(--bg-card)'}}>
+                      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
+                        <span style={{fontWeight:600,fontSize:14}}>{apt}</span>
+                        {vacant ? <span className="badge badge-closed">Vacant</span> : <span className="badge badge-resolved">Occupied</span>}
+                      </div>
+                      {tenants.map((t,i) => (
+                        <div key={i} style={{marginBottom: i < tenants.length-1 ? 8 : 0}}>
+                          <Link to={`/tenants/${t.tenant_id}`} style={{color:'var(--accent-light)',textDecoration:'none',fontWeight:500,fontSize:13}}>
+                            <User size={12} style={{verticalAlign:'middle',marginRight:4}}/>{t.tenant_name}
+                          </Link>
+                          <div style={{display:'flex',gap:8,marginTop:4}}>
+                            {t.tenant_email && <a href={`mailto:${t.tenant_email}`} title={t.tenant_email} style={{color:'var(--text-muted)'}}><Mail size={12}/></a>}
+                            {t.tenant_phone && <a href={`tel:+${t.tenant_phone}`} title={t.tenant_phone} style={{color:'var(--text-muted)'}}><Phone size={12}/></a>}
+                          </div>
+                        </div>
+                      ))}
+                      {vacant && <span style={{fontSize:12,color:'var(--text-muted)'}}>No current tenant</span>}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       <div className="card"><div className="card-header"><h3>All Issues ({issues.length})</h3></div>
         <div className="table-container"><table><thead><tr><th>Ref</th><th>Issue</th><th>Tenant</th><th>Flat</th><th>Category</th><th>Status</th><th>Priority</th><th>Est. Cost</th><th>Final Cost</th><th>Reported</th><th>Resolved</th></tr></thead><tbody>

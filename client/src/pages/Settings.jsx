@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../utils/api';
 import { useAuth } from '../App';
-import { Save, Plus } from 'lucide-react';
+import { Save, Plus, Mail, RefreshCw, Trash2, Power, PowerOff } from 'lucide-react';
 
 export default function Settings() {
   const { user } = useAuth();
@@ -12,7 +12,28 @@ export default function Settings() {
   const [newStaff, setNewStaff] = useState({ name: '', email: '', password: '', role: 'maintenance' });
   const [pwForm, setPwForm] = useState({ currentPassword: '', newPassword: '' });
 
+  // Email state
+  const [emailAccounts, setEmailAccounts] = useState([]);
+  const [syncLog, setSyncLog] = useState([]);
+  const [imapForm, setImapForm] = useState({ email_address: '', host: 'imap.zoho.com', port: 993, username: '', password: '' });
+  const [emailLoading, setEmailLoading] = useState('');
+  const [emailError, setEmailError] = useState('');
+
+  // Check URL params for Gmail callback result
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('tab') === 'email') setTab('email');
+    if (params.get('gmail') === 'connected') { setEmailError(''); loadEmailAccounts(); }
+    if (params.get('gmail') === 'error') setEmailError(params.get('msg') || 'Gmail connection failed');
+  }, []);
+
   useEffect(() => { api.getSettings().then(setSettings); api.getStaff().then(setStaff); }, []);
+  useEffect(() => { if (tab === 'email') loadEmailAccounts(); }, [tab]);
+
+  const loadEmailAccounts = () => {
+    api.getEmailAccounts().then(setEmailAccounts).catch(() => {});
+    api.getEmailSyncLog().then(setSyncLog).catch(() => {});
+  };
 
   const saveSettings = async () => {
     await api.updateSettings(settings); setSaved(true); setTimeout(() => setSaved(false), 2000);
@@ -27,11 +48,59 @@ export default function Settings() {
     setPwForm({ currentPassword: '', newPassword: '' }); alert('Password changed');
   };
 
+  const connectGmail = async () => {
+    setEmailLoading('gmail'); setEmailError('');
+    try {
+      const { url } = await api.getGmailAuthUrl();
+      window.location.href = url;
+    } catch (e) {
+      setEmailError(e.message);
+      setEmailLoading('');
+    }
+  };
+
+  const connectImap = async () => {
+    if (!imapForm.email_address || !imapForm.username || !imapForm.password) return;
+    setEmailLoading('imap'); setEmailError('');
+    try {
+      await api.addImapAccount(imapForm);
+      setImapForm({ email_address: '', host: 'imap.zoho.com', port: 993, username: '', password: '' });
+      loadEmailAccounts();
+    } catch (e) { setEmailError(e.message); }
+    setEmailLoading('');
+  };
+
+  const triggerSync = async (id) => {
+    setEmailLoading(`sync-${id}`);
+    try {
+      const result = await api.triggerEmailSync(id);
+      alert(`Sync complete: ${result.processed} emails processed, ${result.matched} matched, ${result.issues} issues created${result.error ? '\nError: '+result.error : ''}`);
+      loadEmailAccounts();
+    } catch (e) { setEmailError(e.message); }
+    setEmailLoading('');
+  };
+
+  const toggleAccount = async (id, enabled) => {
+    await api.toggleEmailAccount(id, enabled);
+    loadEmailAccounts();
+  };
+
+  const deleteAccount = async (id) => {
+    if (!confirm('Remove this email account?')) return;
+    await api.deleteEmailAccount(id);
+    loadEmailAccounts();
+  };
+
+  const tabConfig = [
+    ['ai', 'AI Config'], ['whatsapp', 'WhatsApp'], ['notifications', 'Notifications'],
+    ['email', 'Email Sync'], ['team', 'Team'], ['account', 'Account']
+  ];
+
   return (
     <div className="fade-in">
       <div className="page-header"><h2>Settings</h2></div>
       <div className="tabs">
-        {['ai','whatsapp','notifications','team','account'].map(t => <button key={t} className={`tab ${tab===t?'active':''}`} onClick={()=>setTab(t)}>{t==='ai'?'AI Config':t==='whatsapp'?'WhatsApp':t==='notifications'?'Notifications':t==='team'?'Team':t==='account'?'Account':t}</button>)}
+        {tabConfig.map(([t, label]) => <button key={t} className={`tab ${tab===t?'active':''}`} onClick={()=>setTab(t)}>{label}</button>)}
       </div>
 
       {tab === 'ai' && <div className="card"><div className="card-body">
@@ -51,7 +120,7 @@ export default function Settings() {
 
       {tab === 'whatsapp' && <div className="card"><div className="card-body">
         <p style={{fontSize:13,color:'var(--text-secondary)',marginBottom:16}}>WhatsApp credentials are set via Railway environment variables for security. The following are configured there:</p>
-        <div className="detail-field"><span className="detail-field-label">WHATSAPP_PHONE_NUMBER_ID</span><span className={process.env.WHATSAPP_PHONE_NUMBER_ID?'badge badge-resolved':'badge badge-open'}>{process.env.WHATSAPP_PHONE_NUMBER_ID?'Set':'Set in Railway'}</span></div>
+        <div className="detail-field"><span className="detail-field-label">WHATSAPP_PHONE_NUMBER_ID</span><span className="badge badge-open">Set in Railway</span></div>
         <div className="detail-field"><span className="detail-field-label">WHATSAPP_ACCESS_TOKEN</span><span className="badge badge-open">Set in Railway</span></div>
         <div className="detail-field"><span className="detail-field-label">WHATSAPP_VERIFY_TOKEN</span><span className="badge badge-open">Set in Railway</span></div>
       </div></div>}
@@ -72,6 +141,91 @@ export default function Settings() {
         </div>
         <button className="btn btn-primary" style={{marginTop:12}} onClick={saveSettings}><Save size={15}/> {saved ? 'Saved!' : 'Save'}</button>
       </div></div>}
+
+      {tab === 'email' && <div>
+        {emailError && <div style={{padding:12,marginBottom:16,background:'rgba(239,68,68,0.1)',border:'1px solid var(--danger)',borderRadius:8,color:'var(--danger)',fontSize:13}}>{emailError}</div>}
+
+        {/* Connected Accounts */}
+        <div className="card" style={{marginBottom:16}}>
+          <div className="card-header"><h3>Connected Email Accounts</h3></div>
+          {emailAccounts.length > 0 ? (
+            <div className="table-container"><table><thead><tr><th>Provider</th><th>Email</th><th>Last Sync</th><th>Status</th><th>Actions</th></tr></thead><tbody>
+              {emailAccounts.map(a => (
+                <tr key={a.id}>
+                  <td><span className="badge" style={{background: a.provider === 'gmail' ? '#ea4335' : '#2196f3', color: '#fff', textTransform:'capitalize'}}>{a.provider}</span></td>
+                  <td style={{fontWeight:500}}>{a.email_address}</td>
+                  <td style={{fontSize:12,color:'var(--text-secondary)'}}>{a.last_sync_at ? new Date(a.last_sync_at).toLocaleString('en-GB') : 'Never'}</td>
+                  <td>{a.sync_enabled ? <span className="badge badge-resolved">Active</span> : <span className="badge badge-closed">Paused</span>}</td>
+                  <td>
+                    <div style={{display:'flex',gap:6}}>
+                      <button className="btn btn-ghost btn-sm" onClick={()=>triggerSync(a.id)} disabled={emailLoading===`sync-${a.id}`} title="Sync now">
+                        <RefreshCw size={14} className={emailLoading===`sync-${a.id}`?'spin':''}/>
+                      </button>
+                      <button className="btn btn-ghost btn-sm" onClick={()=>toggleAccount(a.id, !a.sync_enabled)} title={a.sync_enabled?'Pause':'Resume'}>
+                        {a.sync_enabled ? <PowerOff size={14}/> : <Power size={14}/>}
+                      </button>
+                      <button className="btn btn-ghost btn-sm" onClick={()=>deleteAccount(a.id)} title="Remove" style={{color:'var(--danger)'}}><Trash2 size={14}/></button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody></table></div>
+          ) : (
+            <div className="card-body" style={{textAlign:'center',color:'var(--text-muted)',padding:32}}>No email accounts connected. Connect Gmail or add an IMAP account below.</div>
+          )}
+        </div>
+
+        {/* Connect Gmail */}
+        <div className="card" style={{marginBottom:16}}>
+          <div className="card-header"><h3><Mail size={16} style={{verticalAlign:'middle',marginRight:6}}/>Connect Gmail</h3></div>
+          <div className="card-body">
+            <p style={{fontSize:13,color:'var(--text-secondary)',marginBottom:12}}>Connect your company Gmail account to automatically scan for tenant maintenance emails. Requires GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET environment variables on Railway.</p>
+            <button className="btn btn-primary" onClick={connectGmail} disabled={emailLoading==='gmail'}>
+              <Mail size={15}/> {emailLoading==='gmail' ? 'Connecting...' : 'Connect Gmail Account'}
+            </button>
+          </div>
+        </div>
+
+        {/* Connect IMAP */}
+        <div className="card" style={{marginBottom:16}}>
+          <div className="card-header"><h3><Mail size={16} style={{verticalAlign:'middle',marginRight:6}}/>Connect IMAP Account (Zoho / Other)</h3></div>
+          <div className="card-body">
+            <p style={{fontSize:13,color:'var(--text-secondary)',marginBottom:12}}>Connect your Zoho Mail or any IMAP-compatible email account. Default settings are pre-configured for Zoho Mail.</p>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+              <div className="form-group"><label className="form-label">Email Address</label>
+                <input className="form-input" value={imapForm.email_address} onChange={e=>setImapForm(f=>({...f,email_address:e.target.value}))} placeholder="office@ffrgroup.com"/></div>
+              <div className="form-group"><label className="form-label">IMAP Host</label>
+                <input className="form-input" value={imapForm.host} onChange={e=>setImapForm(f=>({...f,host:e.target.value}))} placeholder="imap.zoho.com"/></div>
+              <div className="form-group"><label className="form-label">Username</label>
+                <input className="form-input" value={imapForm.username} onChange={e=>setImapForm(f=>({...f,username:e.target.value}))} placeholder="office@ffrgroup.com"/></div>
+              <div className="form-group"><label className="form-label">Password / App Password</label>
+                <input className="form-input" type="password" value={imapForm.password} onChange={e=>setImapForm(f=>({...f,password:e.target.value}))} placeholder="App-specific password"/></div>
+            </div>
+            <button className="btn btn-primary" onClick={connectImap} disabled={emailLoading==='imap'} style={{marginTop:8}}>
+              {emailLoading==='imap' ? 'Testing Connection...' : 'Test & Connect'}
+            </button>
+          </div>
+        </div>
+
+        {/* Sync Log */}
+        {syncLog.length > 0 && (
+          <div className="card">
+            <div className="card-header"><h3>Recent Email Sync Log</h3></div>
+            <div className="table-container"><table><thead><tr><th>Time</th><th>Account</th><th>From</th><th>Subject</th><th>Matched Tenant</th><th>Status</th></tr></thead><tbody>
+              {syncLog.slice(0, 25).map(l => (
+                <tr key={l.id}>
+                  <td style={{fontSize:12,color:'var(--text-secondary)',whiteSpace:'nowrap'}}>{new Date(l.processed_at).toLocaleString('en-GB',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</td>
+                  <td style={{fontSize:12}}><span className="badge" style={{background: l.provider === 'gmail' ? '#ea4335' : '#2196f3', color: '#fff', fontSize:10}}>{l.provider}</span></td>
+                  <td style={{fontSize:12,maxWidth:150,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{l.from_address}</td>
+                  <td style={{fontSize:12,maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{l.subject}</td>
+                  <td>{l.tenant_name ? <span style={{color:'var(--accent-light)',fontWeight:500,fontSize:12}}>{l.tenant_name}</span> : <span style={{color:'var(--text-muted)',fontSize:12}}>No match</span>}</td>
+                  <td><span className={`badge ${l.status==='issue_created'?'badge-resolved':l.status==='matched'?'badge-in_progress':'badge-closed'}`} style={{fontSize:10}}>{l.status?.replace(/_/g,' ')}</span></td>
+                </tr>
+              ))}
+            </tbody></table></div>
+          </div>
+        )}
+      </div>}
 
       {tab === 'team' && <div>
         <div className="card" style={{marginBottom:16}}><div className="card-header"><h3>Team Members</h3></div>

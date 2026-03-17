@@ -82,13 +82,34 @@ router.put('/budgets', authenticate, requireAdmin, (req, res) => {
 router.get('/tenants', authenticate, (req, res) => {
   const db = getDb();
   try {
-    res.json(db.prepare(`
+    const { year, q } = req.query;
+    let query = `
       SELECT t.*, p.name as property_name,
         (SELECT COUNT(*) FROM issues WHERE tenant_id = t.id) as total_issues,
         (SELECT COUNT(*) FROM issues WHERE tenant_id = t.id AND status NOT IN ('resolved','closed')) as open_issues,
         (SELECT COALESCE(SUM(final_cost),0) FROM issues WHERE tenant_id = t.id AND final_cost IS NOT NULL) as total_spend
-      FROM tenants t LEFT JOIN properties p ON t.property_id = p.id ORDER BY t.name
-    `).all());
+      FROM tenants t LEFT JOIN properties p ON t.property_id = p.id
+    `;
+    const params = [];
+    const conditions = [];
+    if (year) { conditions.push("t.academic_year = ?"); params.push(year); }
+    if (q) { conditions.push("(t.name LIKE ? OR t.email LIKE ? OR t.phone LIKE ?)"); params.push(`%${q}%`, `%${q}%`, `%${q}%`); }
+    if (conditions.length) query += ' WHERE ' + conditions.join(' AND ');
+    query += ' ORDER BY t.name';
+    res.json(db.prepare(query).all(...params));
+  } finally { db.close(); }
+});
+
+router.get('/tenants/search', authenticate, (req, res) => {
+  const db = getDb();
+  try {
+    const q = req.query.q || '';
+    if (!q) return res.json([]);
+    res.json(db.prepare(`
+      SELECT t.id, t.name, t.email, t.phone, t.property_id, t.academic_year, p.name as property_name
+      FROM tenants t LEFT JOIN properties p ON t.property_id = p.id
+      WHERE t.name LIKE ? OR t.email LIKE ? ORDER BY t.name LIMIT 20
+    `).all(`%${q}%`, `%${q}%`));
   } finally { db.close(); }
 });
 
@@ -103,14 +124,37 @@ router.get('/tenants/:id/issues', authenticate, (req, res) => {
       FROM issues i LEFT JOIN properties p ON i.property_id = p.id
       WHERE i.tenant_id = ? ORDER BY i.created_at DESC
     `).all(req.params.id);
-    res.json({ tenant, issues });
+    const tenancies = db.prepare(`
+      SELECT tn.*, p.name as property_name
+      FROM tenancies tn LEFT JOIN properties p ON tn.property_id = p.id
+      WHERE tn.tenant_id = ? ORDER BY tn.academic_year DESC
+    `).all(req.params.id);
+    res.json({ tenant, issues, tenancies });
   } finally { db.close(); }
 });
 
 router.put('/tenants/:id', authenticate, (req, res) => {
-  const { name, phone, email, property_id, flat_number } = req.body;
+  const { name, phone, email, property_id, flat_number, student_id } = req.body;
   const db = getDb();
-  try { db.prepare('UPDATE tenants SET name = ?, phone = ?, email = ?, property_id = ?, flat_number = ? WHERE id = ?').run(name, phone, email, property_id, flat_number, req.params.id); res.json({ success: true }); } finally { db.close(); }
+  try {
+    db.prepare('UPDATE tenants SET name = ?, phone = ?, email = ?, property_id = ?, flat_number = ?, student_id = ? WHERE id = ?').run(name, phone, email, property_id, flat_number, student_id || null, req.params.id);
+    res.json({ success: true });
+  } finally { db.close(); }
+});
+
+// Property apartments (for 52 Old Elvet apartment grid)
+router.get('/properties/:id/apartments', authenticate, (req, res) => {
+  const db = getDb();
+  try {
+    const apartments = db.prepare(`
+      SELECT tn.flat_number as apartment, tn.academic_year, tn.active, tn.tenancy_start, tn.tenancy_end,
+        tn.rent_monthly, t.id as tenant_id, t.name as tenant_name, t.email as tenant_email, t.phone as tenant_phone
+      FROM tenancies tn JOIN tenants t ON tn.tenant_id = t.id
+      WHERE tn.property_id = ? AND tn.flat_number IS NOT NULL
+      ORDER BY tn.flat_number, t.name
+    `).all(req.params.id);
+    res.json(apartments);
+  } finally { db.close(); }
 });
 
 // ===== ANALYTICS =====

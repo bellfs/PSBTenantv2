@@ -21,6 +21,7 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/issues', require('./routes/issues'));
 app.use('/api/contractors', require('./routes/contractors'));
+app.use('/api/email', require('./routes/email'));
 app.use('/api', require('./routes/api'));
 
 const clientBuild = path.join(__dirname, '..', 'client', 'dist');
@@ -46,6 +47,12 @@ app.listen(PORT, async () => {
   console.log(`  ║  WhatsApp:     ${(hasWhatsApp ? 'SET' : 'MISSING').padEnd(31)}║`);
   console.log(`  ╚═══════════════════════════════════════════════╝\n`);
   if (!hasOpenAI && !hasAnthropic) console.warn('  ⚠ WARNING: No LLM API key. Set OPENAI_API_KEY or ANTHROPIC_API_KEY.');
+
+  // Start email sync scheduler
+  try {
+    const { startSyncScheduler } = require('./services/email-sync');
+    startSyncScheduler();
+  } catch (e) { console.log('  Email sync scheduler skipped:', e.message); }
 
   // Auto-subscribe this app to the WABA for webhook delivery
   if (process.env.WHATSAPP_BUSINESS_ACCOUNT_ID && process.env.WHATSAPP_ACCESS_TOKEN) {

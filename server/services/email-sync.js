@@ -1,0 +1,386 @@
+/**
+ * Email Sync Service
+ * Handles Gmail OAuth and IMAP email scanning for tenant issue detection.
+ * Periodically scans connected email accounts, matches senders to tenants,
+ * and uses AI to extract maintenance issues from emails.
+ */
+
+const { getDb } = require('../database');
+const { v4: uuidv4 } = require('uuid');
+
+// ===== GMAIL OAUTH =====
+
+let gmailAuth = null;
+try {
+  const { google } = require('googleapis');
+  gmailAuth = google;
+} catch (e) {
+  console.log('[EmailSync] googleapis not installed - Gmail OAuth disabled');
+}
+
+function getGmailOAuth2Client() {
+  if (!gmailAuth) throw new Error('googleapis not installed');
+  const clientId = process.env.GOOGLE_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+  const redirectUri = process.env.GOOGLE_REDIRECT_URI || 'https://maintenance.52oldelvet.com/api/email/accounts/gmail/callback';
+  if (!clientId || !clientSecret) throw new Error('GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET required');
+  return new gmailAuth.auth.OAuth2(clientId, clientSecret, redirectUri);
+}
+
+function getGmailAuthUrl() {
+  const oauth2Client = getGmailOAuth2Client();
+  return oauth2Client.generateAuthUrl({
+    access_type: 'offline',
+    prompt: 'consent',
+    scope: [
+      'https://www.googleapis.com/auth/gmail.readonly',
+      'https://www.googleapis.com/auth/userinfo.email',
+    ],
+  });
+}
+
+async function handleGmailCallback(code) {
+  const oauth2Client = getGmailOAuth2Client();
+  const { tokens } = await oauth2Client.getToken(code);
+  oauth2Client.setCredentials(tokens);
+
+  // Get user email
+  const oauth2 = gmailAuth.google ? gmailAuth.oauth2({ version: 'v2', auth: oauth2Client }) : null;
+  let email = 'unknown@gmail.com';
+  try {
+    const gmail = gmailAuth.gmail({ version: 'v1', auth: oauth2Client });
+    const profile = await gmail.users.getProfile({ userId: 'me' });
+    email = profile.data.emailAddress;
+  } catch (e) { console.log('[Gmail] Could not get profile:', e.message); }
+
+  // Store in DB
+  const db = getDb();
+  try {
+    db.prepare('INSERT INTO email_accounts (provider, email_address, credentials, sync_enabled) VALUES (?, ?, ?, 1)')
+      .run('gmail', email, JSON.stringify(tokens));
+    console.log(`[Gmail] Connected: ${email}`);
+    return { email, provider: 'gmail' };
+  } finally { db.close(); }
+}
+
+async function syncGmailAccount(account) {
+  if (!gmailAuth) return { processed: 0, matched: 0, issues: 0 };
+  const oauth2Client = getGmailOAuth2Client();
+  const tokens = JSON.parse(account.credentials);
+  oauth2Client.setCredentials(tokens);
+
+  // Refresh token if needed
+  if (tokens.expiry_date && tokens.expiry_date < Date.now()) {
+    try {
+      const { credentials } = await oauth2Client.refreshAccessToken();
+      oauth2Client.setCredentials(credentials);
+      const db = getDb();
+      db.prepare('UPDATE email_accounts SET credentials = ? WHERE id = ?').run(JSON.stringify(credentials), account.id);
+      db.close();
+    } catch (e) {
+      console.error('[Gmail] Token refresh failed:', e.message);
+      return { processed: 0, matched: 0, issues: 0, error: 'Token refresh failed' };
+    }
+  }
+
+  const gmail = gmailAuth.gmail({ version: 'v1', auth: oauth2Client });
+
+  // Get messages from last 24 hours
+  const after = Math.floor((Date.now() - 86400000) / 1000);
+  const query = `after:${after} -from:me`;
+
+  try {
+    const listRes = await gmail.users.messages.list({ userId: 'me', q: query, maxResults: 50 });
+    const messages = listRes.data.messages || [];
+    let processed = 0, matched = 0, issuesCreated = 0;
+
+    for (const msg of messages) {
+      const db = getDb();
+      // Skip if already processed
+      const existing = db.prepare('SELECT id FROM email_sync_log WHERE message_id = ?').get(msg.id);
+      db.close();
+      if (existing) continue;
+
+      // Get full message
+      const fullMsg = await gmail.users.messages.get({ userId: 'me', id: msg.id, format: 'full' });
+      const headers = fullMsg.data.payload?.headers || [];
+      const from = headers.find(h => h.name.toLowerCase() === 'from')?.value || '';
+      const subject = headers.find(h => h.name.toLowerCase() === 'subject')?.value || '';
+
+      // Extract email address and name from "Name <email>" format
+      const emailMatch = from.match(/<(.+?)>/);
+      const fromEmail = emailMatch ? emailMatch[1] : from.trim();
+      const fromName = emailMatch ? from.replace(/<.+?>/, '').trim().replace(/"/g, '') : '';
+
+      // Get body text
+      let body = '';
+      if (fullMsg.data.payload?.body?.data) {
+        body = Buffer.from(fullMsg.data.payload.body.data, 'base64').toString('utf-8');
+      } else if (fullMsg.data.payload?.parts) {
+        const textPart = fullMsg.data.payload.parts.find(p => p.mimeType === 'text/plain');
+        if (textPart?.body?.data) {
+          body = Buffer.from(textPart.body.data, 'base64').toString('utf-8');
+        }
+      }
+
+      processed++;
+      const result = await processEmail(account.id, msg.id, fromEmail, fromName, subject, body);
+      if (result.matched) matched++;
+      if (result.issueCreated) issuesCreated++;
+    }
+
+    // Update last sync time
+    const db2 = getDb();
+    db2.prepare('UPDATE email_accounts SET last_sync_at = CURRENT_TIMESTAMP WHERE id = ?').run(account.id);
+    db2.close();
+
+    return { processed, matched, issues: issuesCreated };
+  } catch (e) {
+    console.error('[Gmail] Sync error:', e.message);
+    return { processed: 0, matched: 0, issues: 0, error: e.message };
+  }
+}
+
+// ===== IMAP =====
+
+let ImapSimple = null;
+try {
+  ImapSimple = require('imap-simple');
+} catch (e) {
+  console.log('[EmailSync] imap-simple not installed - IMAP disabled');
+}
+
+async function testImapConnection(config) {
+  if (!ImapSimple) throw new Error('imap-simple not installed');
+  const connection = await ImapSimple.connect({
+    imap: { host: config.host, port: config.port || 993, tls: true, user: config.username, password: config.password, authTimeout: 10000 }
+  });
+  await connection.end();
+  return true;
+}
+
+async function syncImapAccount(account) {
+  if (!ImapSimple) return { processed: 0, matched: 0, issues: 0 };
+  const creds = JSON.parse(account.credentials);
+
+  try {
+    const connection = await ImapSimple.connect({
+      imap: { host: creds.host, port: creds.port || 993, tls: true, user: creds.username, password: creds.password, authTimeout: 15000 }
+    });
+
+    await connection.openBox('INBOX');
+
+    // Search for emails from last 7 days
+    const since = new Date(Date.now() - 7 * 86400000);
+    const searchCriteria = [['SINCE', since.toISOString().split('T')[0]]];
+    const fetchOptions = { bodies: ['HEADER', 'TEXT'], struct: true };
+
+    const messages = await connection.search(searchCriteria, fetchOptions);
+    let processed = 0, matched = 0, issuesCreated = 0;
+
+    for (const msg of messages) {
+      const msgId = msg.attributes?.uid?.toString() || `imap-${Date.now()}-${Math.random()}`;
+      const db = getDb();
+      const existing = db.prepare('SELECT id FROM email_sync_log WHERE message_id = ?').get(msgId);
+      db.close();
+      if (existing) continue;
+
+      const header = msg.parts?.find(p => p.which === 'HEADER')?.body || {};
+      const from = (header.from || [''])[0];
+      const subject = (header.subject || [''])[0];
+
+      const textPart = msg.parts?.find(p => p.which === 'TEXT');
+      const body = textPart?.body || '';
+
+      const emailMatch = from.match(/<(.+?)>/);
+      const fromEmail = emailMatch ? emailMatch[1] : from.trim();
+      const fromName = emailMatch ? from.replace(/<.+?>/, '').trim().replace(/"/g, '') : '';
+
+      processed++;
+      const result = await processEmail(account.id, msgId, fromEmail, fromName, subject, body);
+      if (result.matched) matched++;
+      if (result.issueCreated) issuesCreated++;
+    }
+
+    await connection.end();
+
+    const db2 = getDb();
+    db2.prepare('UPDATE email_accounts SET last_sync_at = CURRENT_TIMESTAMP WHERE id = ?').run(account.id);
+    db2.close();
+
+    return { processed, matched, issues: issuesCreated };
+  } catch (e) {
+    console.error('[IMAP] Sync error:', e.message);
+    return { processed: 0, matched: 0, issues: 0, error: e.message };
+  }
+}
+
+// ===== SHARED EMAIL PROCESSING =====
+
+async function processEmail(accountId, messageId, fromEmail, fromName, subject, body) {
+  const db = getDb();
+  let matchedTenantId = null;
+  let issueCreated = false;
+
+  try {
+    // Step 1: Match sender to tenant
+    // Direct email match
+    let tenant = db.prepare('SELECT t.*, p.name as property_name FROM tenants t LEFT JOIN properties p ON t.property_id = p.id WHERE LOWER(t.email) = LOWER(?)').get(fromEmail);
+
+    // Fuzzy name match if no direct email match
+    if (!tenant && fromName) {
+      const nameParts = fromName.toLowerCase().split(/\s+/);
+      if (nameParts.length >= 2) {
+        tenant = db.prepare('SELECT t.*, p.name as property_name FROM tenants t LEFT JOIN properties p ON t.property_id = p.id WHERE LOWER(t.name) LIKE ? AND LOWER(t.name) LIKE ?')
+          .get(`%${nameParts[0]}%`, `%${nameParts[nameParts.length-1]}%`);
+      }
+    }
+
+    if (tenant) {
+      matchedTenantId = tenant.id;
+
+      // Step 2: Check if email looks like a maintenance issue
+      const isMaintenanceRelated = checkMaintenanceRelevance(subject, body);
+
+      if (isMaintenanceRelated) {
+        // Step 3: Use AI to extract issue details
+        try {
+          const issueData = await extractIssueFromEmail(subject, body, tenant);
+          if (issueData) {
+            // Create the issue
+            const uuid = uuidv4().split('-')[0].toUpperCase();
+            const result = db.prepare(`
+              INSERT INTO issues (uuid, tenant_id, property_id, flat_number, category, title, description, status, priority, ai_diagnosis, created_at, updated_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            `).run(uuid, tenant.id, tenant.property_id, tenant.flat_number, issueData.category, issueData.title, issueData.description, issueData.priority || 'medium', issueData.diagnosis || '');
+
+            // Add first message
+            db.prepare('INSERT INTO messages (issue_id, sender, content, message_type) VALUES (?, ?, ?, ?)')
+              .run(result.lastInsertRowid, 'tenant', `[From email: ${subject}]\n\n${body.slice(0, 2000)}`, 'text');
+
+            // Log activity
+            db.prepare('INSERT INTO activity_log (issue_id, action, details, performed_by) VALUES (?, ?, ?, ?)')
+              .run(result.lastInsertRowid, 'email_issue_created', `Auto-created from email by ${fromName} <${fromEmail}>`, 'system');
+
+            issueCreated = true;
+            matchedTenantId = tenant.id;
+
+            // Log to sync log
+            db.prepare('INSERT OR IGNORE INTO email_sync_log (email_account_id, message_id, from_address, subject, matched_tenant_id, issue_id, status) VALUES (?, ?, ?, ?, ?, ?, ?)')
+              .run(accountId, messageId, fromEmail, subject, tenant.id, result.lastInsertRowid, 'issue_created');
+
+            return { matched: true, issueCreated: true };
+          }
+        } catch (e) {
+          console.error('[EmailSync] AI extraction error:', e.message);
+        }
+      }
+    }
+
+    // Log non-matched or non-maintenance emails
+    db.prepare('INSERT OR IGNORE INTO email_sync_log (email_account_id, message_id, from_address, subject, matched_tenant_id, status) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(accountId, messageId, fromEmail, subject, matchedTenantId, matchedTenantId ? 'matched' : 'processed');
+
+    return { matched: !!matchedTenantId, issueCreated: false };
+  } finally { db.close(); }
+}
+
+function checkMaintenanceRelevance(subject, body) {
+  const text = `${subject} ${body}`.toLowerCase();
+  const keywords = [
+    'repair', 'broken', 'leak', 'damage', 'fix', 'maintenance', 'fault', 'issue',
+    'heating', 'boiler', 'plumbing', 'electrical', 'damp', 'mould', 'mold',
+    'window', 'door', 'lock', 'toilet', 'shower', 'sink', 'tap', 'radiator',
+    'noise', 'pest', 'bug', 'mice', 'rat', 'cockroach', 'ant',
+    'water', 'flood', 'drip', 'crack', 'hole', 'stain', 'smell',
+    'not working', 'doesn\'t work', 'won\'t work', 'stopped working',
+    'urgent', 'emergency', 'dangerous', 'safety',
+  ];
+  return keywords.some(kw => text.includes(kw));
+}
+
+async function extractIssueFromEmail(subject, body, tenant) {
+  try {
+    const { callLLM } = require('./llm');
+    const prompt = `You are analysing an email that appears to be a property maintenance issue report from a tenant.
+
+Email Subject: ${subject}
+Email Body: ${body.slice(0, 3000)}
+
+Tenant: ${tenant.name} at ${tenant.property_name || 'unknown property'}
+
+Extract the following in JSON format:
+{
+  "title": "Brief title of the maintenance issue (max 80 chars)",
+  "description": "Clear description of the issue",
+  "category": "One of: plumbing, electrical, heating, structural, pest_control, appliance, general, other",
+  "priority": "One of: low, medium, high, urgent",
+  "diagnosis": "Brief AI diagnosis of the likely issue and suggested action"
+}
+
+If the email is NOT about a maintenance/repair issue, return null.
+Return ONLY valid JSON, no markdown or explanation.`;
+
+    const response = await callLLM([{ role: 'user', content: prompt }], { maxTokens: 500 });
+    const cleaned = response.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+    if (cleaned === 'null') return null;
+    return JSON.parse(cleaned);
+  } catch (e) {
+    console.error('[EmailSync] LLM extraction failed:', e.message);
+    return null;
+  }
+}
+
+// ===== SYNC SCHEDULER =====
+
+let syncInterval = null;
+
+async function syncAllAccounts() {
+  const db = getDb();
+  let accounts;
+  try {
+    accounts = db.prepare('SELECT * FROM email_accounts WHERE sync_enabled = 1').all();
+  } finally { db.close(); }
+
+  if (!accounts || accounts.length === 0) return;
+
+  for (const account of accounts) {
+    try {
+      let result;
+      if (account.provider === 'gmail') {
+        result = await syncGmailAccount(account);
+      } else if (account.provider === 'imap') {
+        result = await syncImapAccount(account);
+      }
+      if (result && (result.processed > 0 || result.error)) {
+        console.log(`[EmailSync] ${account.provider}:${account.email_address} - processed:${result.processed} matched:${result.matched} issues:${result.issues}${result.error ? ' error:'+result.error : ''}`);
+      }
+    } catch (e) {
+      console.error(`[EmailSync] Error syncing ${account.email_address}:`, e.message);
+    }
+  }
+}
+
+function startSyncScheduler() {
+  if (syncInterval) return;
+  // Run every 5 minutes
+  syncInterval = setInterval(syncAllAccounts, 5 * 60 * 1000);
+  // Initial sync after 30 seconds
+  setTimeout(syncAllAccounts, 30000);
+  console.log('[EmailSync] Scheduler started (5-min interval)');
+}
+
+function stopSyncScheduler() {
+  if (syncInterval) { clearInterval(syncInterval); syncInterval = null; }
+}
+
+module.exports = {
+  getGmailAuthUrl,
+  handleGmailCallback,
+  syncGmailAccount,
+  testImapConnection,
+  syncImapAccount,
+  syncAllAccounts,
+  startSyncScheduler,
+  stopSyncScheduler,
+};
