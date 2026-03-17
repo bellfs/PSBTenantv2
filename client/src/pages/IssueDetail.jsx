@@ -105,6 +105,11 @@ ${report.issue.attended_by ? 'Attended By: ' + report.issue.attended_by : ''}
                 {messages.map(m => (
                   <div key={m.id} className={`chat-bubble ${m.sender}`}>
                     <div className="chat-sender">{m.sender==='tenant'?issue.tenant_name:m.sender==='bot'?'AI Bot':'Staff'}</div>
+                    {m.message_type === 'image' && attachments?.find(a => a.message_id === m.id) && (
+                      <a href={attachments.find(a => a.message_id === m.id).file_path} target="_blank" rel="noopener noreferrer">
+                        <img src={attachments.find(a => a.message_id === m.id).file_path} alt="Photo" style={{maxWidth:'100%',maxHeight:200,borderRadius:6,marginBottom:4,display:'block'}}/>
+                      </a>
+                    )}
                     <div style={{whiteSpace:'pre-wrap'}}>{m.content}</div>
                     <div className="chat-time">{fmt(m.created_at)}</div>
                   </div>
@@ -129,9 +134,10 @@ ${report.issue.attended_by ? 'Attended By: ' + report.issue.attended_by : ''}
                   <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill, minmax(180px, 1fr))',gap:12}}>
                     {photos.map(p => (
                       <div key={p.id} style={{background:'var(--bg-secondary)',borderRadius:8,overflow:'hidden',border:'1px solid var(--border-light)'}}>
-                        <div style={{height:140,background:'var(--bg-input)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,color:'var(--text-muted)'}}>
-                          <Image size={24} style={{opacity:0.4}}/>
-                        </div>
+                        <a href={p.file_path} target="_blank" rel="noopener noreferrer">
+                          <img src={p.file_path} alt="Tenant photo" style={{width:'100%',height:140,objectFit:'cover',display:'block'}} onError={e => { e.target.style.display='none'; e.target.nextSibling.style.display='flex'; }}/>
+                          <div style={{height:140,background:'var(--bg-input)',alignItems:'center',justifyContent:'center',fontSize:12,color:'var(--text-muted)',display:'none'}}><Image size={24} style={{opacity:0.4}}/></div>
+                        </a>
                         {p.ai_analysis && (() => {
                           try {
                             const a = JSON.parse(p.ai_analysis.replace(/```json\n?/g,'').replace(/```\n?/g,''));

@@ -61,10 +61,21 @@ async function sendWhatsAppMessage(to, text) {
 async function downloadWhatsAppMedia(mediaId) {
   const accessToken = process.env.WHATSAPP_ACCESS_TOKEN;
   try {
-    const urlR = await axios.get(`${GRAPH_API_URL}/${mediaId}`, { headers: { 'Authorization': `Bearer ${accessToken}` } });
-    const mediaR = await axios.get(urlR.data.url, { headers: { 'Authorization': `Bearer ${accessToken}` }, responseType: 'arraybuffer' });
+    const urlR = await axios.get(`${GRAPH_API_URL}/${mediaId}`, {
+      headers: { 'Authorization': `Bearer ${accessToken}` },
+      timeout: 15000
+    });
+    const mediaR = await axios.get(urlR.data.url, {
+      headers: { 'Authorization': `Bearer ${accessToken}` },
+      responseType: 'arraybuffer',
+      timeout: 30000
+    });
     return { data: Buffer.from(mediaR.data), mimeType: urlR.data.mime_type };
-  } catch (err) { console.error('[WhatsApp] Media download error:', err.message); return null; }
+  } catch (err) {
+    console.error('[WhatsApp] Media download error:', err.message);
+    if (err.code === 'ECONNABORTED') console.error('[WhatsApp] Media download TIMED OUT for mediaId:', mediaId);
+    return null;
+  }
 }
 
 async function processIncomingMessage(webhookData) {
@@ -187,14 +198,15 @@ async function processIncomingMessage(webhookData) {
     }
 
     // Save tenant message
-    db.prepare('INSERT INTO messages (issue_id, sender, content, message_type, whatsapp_message_id) VALUES (?, ?, ?, ?, ?)').run(
+    const msgResult = db.prepare('INSERT INTO messages (issue_id, sender, content, message_type, whatsapp_message_id) VALUES (?, ?, ?, ?, ?)').run(
       activeIssue.id, 'tenant', textContent, messageType === 'image' ? 'image' : 'text', whatsappMessageId
     );
+    const savedMessageId = msgResult.lastInsertRowid;
 
     // Handle image attachment and analysis
     if (imageData) {
       const aR = db.prepare('INSERT INTO attachments (issue_id, message_id, file_path, file_type) VALUES (?, ?, ?, ?)').run(
-        activeIssue.id, 0, imageData.path, imageData.mimeType
+        activeIssue.id, savedMessageId, imageData.path, imageData.mimeType
       );
       try {
         const analysis = await analyseImage(imageData.base64, imageData.mimeType, textContent);
@@ -312,6 +324,13 @@ If escalating instead, end with: "Is there anything else you need help with?"`;
     }
   } catch (err) {
     console.error('[WhatsApp] Processing error:', err);
+    try {
+      db.prepare('INSERT INTO activity_log (action, details, performed_by) VALUES (?, ?, ?)').run(
+        'message_processing_error',
+        `Error: ${err.message} | Stack: ${(err.stack || '').slice(0, 400)}`,
+        'system'
+      );
+    } catch (logErr) { console.error('[WhatsApp] Failed to log error to DB:', logErr.message); }
   } finally {
     db.close();
   }
