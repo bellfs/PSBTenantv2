@@ -1,0 +1,48 @@
+services:
+  - type: web
+    name: psb-maintenance-hub
+    runtime: node
+    region: frankfurt  # EU region, closest to UK
+    plan: starter      # $7/mo, always-on (free tier sleeps after 15 min inactivity)
+    buildCommand: npm install && cd client && npm install --include=dev && npm run build
+    startCommand: node server/index.js
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3001
+      - key: JWT_SECRET
+        generateValue: true
+      - key: WHATSAPP_PHONE_NUMBER_ID
+        sync: false
+      - key: WHATSAPP_ACCESS_TOKEN
+        sync: false
+      - key: WHATSAPP_VERIFY_TOKEN
+        sync: false
+      - key: WHATSAPP_BUSINESS_ACCOUNT_ID
+        sync: false
+      - key: LLM_PROVIDER
+        value: anthropic
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: SMTP_HOST
+        value: smtp.gmail.com
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: ESCALATION_EMAIL
+        value: admin@52oldelvet.com
+      - key: ADMIN_EMAIL
+        value: admin@52oldelvet.com
+      - key: ADMIN_PASSWORD
+        sync: false
+    disk:
+      name: psb-data
+      mountPath: /opt/render/project/src/server/data
+      sizeGB: 1

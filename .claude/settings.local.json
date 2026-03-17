@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(gh repo view bellfs/PSBTenantv2 --json description,url,defaultBranchRef)",
+      "Bash(git init)",
+      "Bash(git remote add origin https://github.com/bellfs/PSBTenantv2.git)",
+      "Bash(git fetch origin)",
+      "Bash(git add -A)"
+    ]
+  }
+}
