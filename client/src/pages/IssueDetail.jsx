@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { api } from '../utils/api';
-import { ArrowLeft, Send, FileText, StickyNote, Clock, AlertCircle, Image } from 'lucide-react';
+import { ArrowLeft, Send, FileText, StickyNote, Clock, AlertCircle, Image, HardHat, Copy, Check, X } from 'lucide-react';
 
 export default function IssueDetail() {
   const { id } = useParams();
@@ -15,12 +15,21 @@ export default function IssueDetail() {
   const [noteText, setNoteText] = useState('');
   const [addingNote, setAddingNote] = useState(false);
   const [activeTab, setActiveTab] = useState('chat');
+  const [quotes, setQuotes] = useState([]);
+  const [contractors, setContractors] = useState([]);
+  const [selectedContractor, setSelectedContractor] = useState('');
+  const [creatingQuote, setCreatingQuote] = useState(false);
+  const [jobBrief, setJobBrief] = useState(null);
+  const [briefLoading, setBriefLoading] = useState(false);
+  const [briefCopied, setBriefCopied] = useState(false);
+
+  const loadQuotes = () => api.getIssueQuotes(id).then(setQuotes).catch(() => {});
 
   const load = () => api.getIssue(id).then(d => {
     setData(d);
     setEf({ final_cost: d.issue.final_cost ?? '', final_notes: d.issue.final_notes || '', attended_by: d.issue.attended_by || '', resolution_notes: d.issue.resolution_notes || '', resolved_at: d.issue.resolved_at ? d.issue.resolved_at.slice(0,10) : '' });
   });
-  useEffect(() => { load(); }, [id]);
+  useEffect(() => { load(); loadQuotes(); api.getContractors().then(setContractors).catch(() => {}); }, [id]);
   if (!data) return <div style={{padding:40,textAlign:'center'}}><div className="loading-spinner" style={{margin:'0 auto'}}/></div>;
   const { issue, messages, attachments, staff, notes, similar } = data;
 
@@ -94,6 +103,7 @@ ${report.issue.attended_by ? 'Attended By: ' + report.issue.attended_by : ''}
             <button className={`tab ${activeTab==='chat'?'active':''}`} onClick={()=>setActiveTab('chat')}>Conversation</button>
             <button className={`tab ${activeTab==='photos'?'active':''}`} onClick={()=>setActiveTab('photos')}>Photos {photos.length > 0 && `(${photos.length})`}</button>
             <button className={`tab ${activeTab==='report'?'active':''}`} onClick={()=>setActiveTab('report')}>AI Report</button>
+            <button className={`tab ${activeTab==='quotes'?'active':''}`} onClick={()=>setActiveTab('quotes')}>Quotes {quotes.length > 0 && `(${quotes.length})`}</button>
             <button className={`tab ${activeTab==='notes'?'active':''}`} onClick={()=>setActiveTab('notes')}>Notes {notes?.length > 0 && `(${notes.length})`}</button>
             <button className={`tab ${activeTab==='activity'?'active':''}`} onClick={()=>setActiveTab('activity')}>Activity</button>
           </div>
@@ -173,6 +183,96 @@ ${report.issue.attended_by ? 'Attended By: ' + report.issue.attended_by : ''}
                     </div>
                   </div>
                 )}
+              </div>
+            </div>
+          )}
+
+          {/* Quotes tab */}
+          {activeTab === 'quotes' && (
+            <div className="card" style={{borderRadius:'0 0 8px 8px'}}>
+              <div className="card-body">
+                {/* Request quote form */}
+                <div style={{display:'flex',gap:8,marginBottom:16,alignItems:'flex-end'}}>
+                  <div style={{flex:1}}>
+                    <label className="form-label">Request Quote</label>
+                    <select className="form-select" value={selectedContractor} onChange={e=>setSelectedContractor(e.target.value)}>
+                      <option value="">Select contractor...</option>
+                      {contractors.filter(c=>c.active).map(c => <option key={c.id} value={c.id}>{c.name} ({c.trade})</option>)}
+                    </select>
+                  </div>
+                  <button className="btn btn-primary" disabled={!selectedContractor||creatingQuote} onClick={async()=>{
+                    setCreatingQuote(true);
+                    try { await api.createQuote(id, { contractor_id: parseInt(selectedContractor), description: jobBrief || '' }); setSelectedContractor(''); await loadQuotes(); await load(); }
+                    catch(e){ alert(e.message); }
+                    setCreatingQuote(false);
+                  }}>{creatingQuote ? 'Creating...' : 'Request Quote'}</button>
+                </div>
+
+                {/* Job brief */}
+                <div style={{marginBottom:20}}>
+                  <button className="btn btn-secondary btn-sm" onClick={async()=>{
+                    setBriefLoading(true);
+                    try { const r = await api.generateJobBrief(id); setJobBrief(r.brief); } catch(e){ alert('Failed: '+e.message); }
+                    setBriefLoading(false);
+                  }} disabled={briefLoading}><HardHat size={14}/> {briefLoading ? 'Generating...' : 'Generate Job Brief'}</button>
+                  {jobBrief && (
+                    <div style={{marginTop:12,background:'var(--bg-secondary)',borderRadius:8,border:'1px solid var(--border-light)',padding:16}}>
+                      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
+                        <span style={{fontSize:11,fontWeight:600,color:'var(--text-secondary)',textTransform:'uppercase'}}>Job Brief</span>
+                        <div style={{display:'flex',gap:4}}>
+                          <button className="btn btn-ghost btn-sm" onClick={()=>{ navigator.clipboard.writeText(jobBrief); setBriefCopied(true); setTimeout(()=>setBriefCopied(false),2000); }}>
+                            {briefCopied ? <><Check size={12}/> Copied</> : <><Copy size={12}/> Copy</>}
+                          </button>
+                          <button className="btn btn-ghost btn-sm" onClick={()=>setJobBrief(null)}><X size={12}/></button>
+                        </div>
+                      </div>
+                      <pre style={{fontSize:12,color:'var(--text-primary)',whiteSpace:'pre-wrap',lineHeight:1.5,margin:0}}>{jobBrief}</pre>
+                    </div>
+                  )}
+                </div>
+
+                {/* Quote list */}
+                {quotes.length === 0 ? (
+                  <div className="empty-state"><HardHat size={32}/><h3>No quotes yet</h3><p style={{fontSize:13,color:'var(--text-muted)'}}>Request a quote from a contractor above</p></div>
+                ) : quotes.map(q => (
+                  <div key={q.id} style={{padding:14,background:'var(--bg-secondary)',borderRadius:8,border:'1px solid var(--border-light)',marginBottom:10}}>
+                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:8}}>
+                      <div>
+                        <div style={{fontWeight:500,fontSize:14}}>{q.contractor_name}</div>
+                        <div style={{fontSize:11,color:'var(--text-muted)'}}>{q.contractor_trade} {q.contractor_phone ? `| ${q.contractor_phone}` : ''}</div>
+                      </div>
+                      <span className={`badge badge-${q.status==='completed'?'resolved':q.status==='approved'?'open':q.status==='rejected'?'closed':q.status==='received'?'in_progress':'escalated'}`}>{q.status}</span>
+                    </div>
+                    {q.amount !== null && <div style={{fontSize:18,fontWeight:600,color:'var(--accent-light)',marginBottom:6}}>{'\u00A3'}{Number(q.amount).toFixed(2)}</div>}
+
+                    {/* Actions based on status */}
+                    <div style={{display:'flex',gap:6,flexWrap:'wrap',marginTop:8}}>
+                      {q.status === 'requested' && (
+                        <>
+                          <div style={{display:'flex',gap:4,alignItems:'center'}}>
+                            <input className="form-input" type="number" step="0.01" placeholder="Amount" style={{width:100,fontSize:12,padding:'4px 8px'}} id={`qa-${q.id}`}/>
+                            <button className="btn btn-primary btn-sm" onClick={async()=>{
+                              const amt = document.getElementById(`qa-${q.id}`).value;
+                              if(!amt)return;
+                              await api.updateQuote(q.id, { amount: parseFloat(amt), status:'received' });
+                              await loadQuotes();
+                            }}>Set Amount</button>
+                          </div>
+                        </>
+                      )}
+                      {q.status === 'received' && (
+                        <>
+                          <button className="btn btn-primary btn-sm" onClick={async()=>{ await api.updateQuote(q.id, {status:'approved'}); await loadQuotes(); await load(); }}>Approve</button>
+                          <button className="btn btn-danger btn-sm" onClick={async()=>{ await api.updateQuote(q.id, {status:'rejected'}); await loadQuotes(); }}>Reject</button>
+                        </>
+                      )}
+                      {q.status === 'approved' && (
+                        <button className="btn btn-primary btn-sm" onClick={async()=>{ await api.updateQuote(q.id, {status:'completed'}); await loadQuotes(); await load(); }}>Mark Completed</button>
+                      )}
+                    </div>
+                    {q.notes && <div style={{fontSize:11,color:'var(--text-muted)',marginTop:6}}>{q.notes}</div>}
+                  </div>
+                ))}
               </div>
             </div>
           )}

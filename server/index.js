@@ -20,6 +20,7 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/issues', require('./routes/issues'));
+app.use('/api/contractors', require('./routes/contractors'));
 app.use('/api', require('./routes/api'));
 
 const clientBuild = path.join(__dirname, '..', 'client', 'dist');

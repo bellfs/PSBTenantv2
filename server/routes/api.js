@@ -9,14 +9,17 @@ const router = express.Router();
 router.get('/properties', authenticate, (req, res) => {
   const db = getDb();
   try {
+    const year = new Date().getFullYear();
     res.json(db.prepare(`
-      SELECT p.*, 
+      SELECT p.*,
         (SELECT COUNT(*) FROM tenants WHERE property_id = p.id) as tenant_count,
         (SELECT COUNT(*) FROM issues WHERE property_id = p.id AND status NOT IN ('resolved','closed')) as open_issues,
         (SELECT COUNT(*) FROM issues WHERE property_id = p.id) as total_issues,
-        (SELECT COALESCE(SUM(final_cost),0) FROM issues WHERE property_id = p.id AND final_cost IS NOT NULL) as total_spend
+        (SELECT COALESCE(SUM(final_cost),0) FROM issues WHERE property_id = p.id AND final_cost IS NOT NULL) as total_spend,
+        (SELECT annual_budget FROM property_budgets WHERE property_id = p.id AND year = ?) as annual_budget,
+        (SELECT COALESCE(SUM(final_cost),0) FROM issues WHERE property_id = p.id AND final_cost IS NOT NULL AND strftime('%Y', resolved_at) = ?) as year_spend
       FROM properties p ORDER BY p.name
-    `).all());
+    `).all(year, String(year)));
   } finally { db.close(); }
 });
 
@@ -45,6 +48,34 @@ router.put('/properties/:id', authenticate, requireAdmin, (req, res) => {
   const { name, address, postcode, num_units } = req.body;
   const db = getDb();
   try { db.prepare('UPDATE properties SET name = ?, address = ?, postcode = ?, num_units = ? WHERE id = ?').run(name, address, postcode, num_units, req.params.id); res.json({ success: true }); } finally { db.close(); }
+});
+
+// ===== BUDGETS =====
+router.get('/budgets', authenticate, (req, res) => {
+  const year = parseInt(req.query.year) || new Date().getFullYear();
+  const db = getDb();
+  try {
+    const budgets = db.prepare(`
+      SELECT p.id as property_id, p.name as property_name,
+        COALESCE(b.annual_budget, 0) as annual_budget,
+        COALESCE((SELECT SUM(final_cost) FROM issues WHERE property_id = p.id AND final_cost IS NOT NULL AND strftime('%Y', resolved_at) = ?), 0) as actual_spend
+      FROM properties p
+      LEFT JOIN property_budgets b ON b.property_id = p.id AND b.year = ?
+      ORDER BY p.name
+    `).all(String(year), year);
+    const totals = budgets.reduce((acc, b) => ({ budget: acc.budget + b.annual_budget, spend: acc.spend + b.actual_spend }), { budget: 0, spend: 0 });
+    res.json({ year, budgets, totals });
+  } finally { db.close(); }
+});
+
+router.put('/budgets', authenticate, requireAdmin, (req, res) => {
+  const { property_id, year, annual_budget } = req.body;
+  if (!property_id || !year) return res.status(400).json({ error: 'property_id and year required' });
+  const db = getDb();
+  try {
+    db.prepare('INSERT INTO property_budgets (property_id, year, annual_budget, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP) ON CONFLICT(property_id, year) DO UPDATE SET annual_budget = ?, updated_at = CURRENT_TIMESTAMP').run(property_id, year, annual_budget || 0, annual_budget || 0);
+    res.json({ success: true });
+  } finally { db.close(); }
 });
 
 // ===== TENANTS =====

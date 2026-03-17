@@ -6,9 +6,11 @@ import { AlertCircle, Clock, CheckCircle, AlertTriangle, Zap, Users } from 'luci
 export default function Dashboard() {
   const [stats, setStats] = useState(null);
   const [sla, setSla] = useState(null);
+  const [budgets, setBudgets] = useState(null);
   useEffect(() => {
     api.getIssueStats().then(setStats);
     api.getSlaMetrics().then(setSla).catch(() => {});
+    api.getBudgets().then(setBudgets).catch(() => {});
   }, []);
   if (!stats) return <div style={{ padding: 40, textAlign: 'center' }}><div className="loading-spinner" style={{ margin: '0 auto' }} /></div>;
 
@@ -25,6 +27,17 @@ export default function Dashboard() {
         <div className="stat-card success"><div className="stat-card-label">Resolved</div><div className="stat-card-value">{stats.resolved}</div><div className="stat-card-sub">{stats.this_week} this week</div></div>
         <div className="stat-card" style={{ borderLeft: '3px solid #a855f7' }}><div className="stat-card-label">Est. Total Cost</div><div className="stat-card-value">&pound;{(stats.total_estimated_cost || 0).toFixed(0)}</div></div>
         <div className="stat-card" style={{ borderLeft: '3px solid #22d3ee' }}><div className="stat-card-label">Actual Spend</div><div className="stat-card-value">&pound;{(stats.total_final_cost || 0).toFixed(0)}</div></div>
+        {budgets?.totals?.budget > 0 && (() => {
+          const pct = Math.round((budgets.totals.spend / budgets.totals.budget) * 100);
+          const c = pct > 90 ? 'var(--danger)' : pct > 70 ? 'var(--warning)' : 'var(--success)';
+          return (
+            <div className="stat-card" style={{ borderLeft: `3px solid ${c}` }}>
+              <div className="stat-card-label">Budget Used</div>
+              <div className="stat-card-value" style={{color:c}}>{pct}%</div>
+              <div className="stat-card-sub">&pound;{budgets.totals.spend.toFixed(0)} / &pound;{budgets.totals.budget.toFixed(0)}</div>
+            </div>
+          );
+        })()}
       </div>
 
       {/* SLA Performance */}

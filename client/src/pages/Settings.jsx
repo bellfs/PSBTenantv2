@@ -31,7 +31,7 @@ export default function Settings() {
     <div className="fade-in">
       <div className="page-header"><h2>Settings</h2></div>
       <div className="tabs">
-        {['ai','whatsapp','team','account'].map(t => <button key={t} className={`tab ${tab===t?'active':''}`} onClick={()=>setTab(t)}>{t==='ai'?'AI Config':t==='whatsapp'?'WhatsApp':t==='team'?'Team':t==='account'?'Account':t}</button>)}
+        {['ai','whatsapp','notifications','team','account'].map(t => <button key={t} className={`tab ${tab===t?'active':''}`} onClick={()=>setTab(t)}>{t==='ai'?'AI Config':t==='whatsapp'?'WhatsApp':t==='notifications'?'Notifications':t==='team'?'Team':t==='account'?'Account':t}</button>)}
       </div>
 
       {tab === 'ai' && <div className="card"><div className="card-body">
@@ -54,6 +54,23 @@ export default function Settings() {
         <div className="detail-field"><span className="detail-field-label">WHATSAPP_PHONE_NUMBER_ID</span><span className={process.env.WHATSAPP_PHONE_NUMBER_ID?'badge badge-resolved':'badge badge-open'}>{process.env.WHATSAPP_PHONE_NUMBER_ID?'Set':'Set in Railway'}</span></div>
         <div className="detail-field"><span className="detail-field-label">WHATSAPP_ACCESS_TOKEN</span><span className="badge badge-open">Set in Railway</span></div>
         <div className="detail-field"><span className="detail-field-label">WHATSAPP_VERIFY_TOKEN</span><span className="badge badge-open">Set in Railway</span></div>
+      </div></div>}
+
+      {tab === 'notifications' && <div className="card"><div className="card-header"><h3>WhatsApp Notifications</h3></div><div className="card-body">
+        <div className="form-group">
+          <label className="form-label">Auto Status Updates to Tenants</label>
+          <p style={{fontSize:12,color:'var(--text-muted)',marginBottom:8}}>Automatically send tenants a WhatsApp message when their issue status changes (e.g. in progress, escalated, resolved).</p>
+          <div className="toggle-group">
+            <button className={`toggle-option ${settings.auto_status_updates==='true'||settings.auto_status_updates===true?'active':''}`} onClick={()=>setSettings(s=>({...s,auto_status_updates:'true'}))}>On</button>
+            <button className={`toggle-option ${settings.auto_status_updates==='false'||settings.auto_status_updates===false?'active':''}`} onClick={()=>setSettings(s=>({...s,auto_status_updates:'false'}))}>Off</button>
+          </div>
+        </div>
+        <div className="form-group" style={{marginTop:20}}>
+          <label className="form-label">Staff Notification Phone Numbers</label>
+          <p style={{fontSize:12,color:'var(--text-muted)',marginBottom:8}}>Comma-separated UK phone numbers (e.g. +447700900001, +447700900002). Staff will receive a WhatsApp message with issue details when a new tenant message arrives.</p>
+          <input className="form-input" value={settings.staff_notify_phones||''} onChange={e=>setSettings(s=>({...s,staff_notify_phones:e.target.value}))} placeholder="+447700900001, +447700900002"/>
+        </div>
+        <button className="btn btn-primary" style={{marginTop:12}} onClick={saveSettings}><Save size={15}/> {saved ? 'Saved!' : 'Save'}</button>
       </div></div>}
 
       {tab === 'team' && <div>

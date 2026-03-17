@@ -317,6 +317,9 @@ If escalating instead, end with: "Is there anything else you need help with?"`;
       }
 
       await sendWhatsAppMessage(from, aiResponse);
+
+      // Notify staff of new tenant message (async, non-blocking)
+      notifyStaff(tenant.name || displayName, property?.name, activeIssue.title, activeIssue.id, activeIssue.uuid, textContent);
     } catch (err) {
       console.error('[AI] Response error:', err.message);
       await sendWhatsAppMessage(from, `Sorry, I'm having a bit of trouble right now. Your issue has been logged and our team will be in touch.\n\n📋 Reference: ${activeIssue.uuid}`);
@@ -425,4 +428,70 @@ async function sendStaffResponse(issueId, staffName, responseText) {
   } finally { db.close(); }
 }
 
-module.exports = { processIncomingMessage, sendWhatsAppMessage, sendStaffResponse, downloadWhatsAppMedia };
+// ============================================================
+// Staff WhatsApp notifications when tenant sends a message
+// ============================================================
+const staffNotifyCache = new Map(); // issueId -> lastNotifyTimestamp
+const STAFF_NOTIFY_COOLDOWN = 300000; // 5 minutes
+
+async function notifyStaff(tenantName, propertyName, issueTitle, issueId, issueUuid, messagePreview) {
+  try {
+    // Rate limit per issue
+    const lastNotify = staffNotifyCache.get(issueId);
+    if (lastNotify && Date.now() - lastNotify < STAFF_NOTIFY_COOLDOWN) return;
+    staffNotifyCache.set(issueId, Date.now());
+
+    const db = getDb();
+    const phoneSetting = db.prepare("SELECT value FROM settings WHERE key = 'staff_notify_phones'").get();
+    db.close();
+    if (!phoneSetting?.value) return;
+
+    const phones = phoneSetting.value.split(',').map(p => p.trim()).filter(Boolean);
+    if (phones.length === 0) return;
+
+    const preview = (messagePreview || '').slice(0, 100);
+    const msg = `New maintenance message from ${tenantName} at ${propertyName || 'Unknown property'}\n\nIssue: ${issueTitle}\nRef: ${issueUuid}\n\n"${preview}"\n\nView: https://maintenance.52oldelvet.com/issues/${issueId}`;
+
+    for (const phone of phones) {
+      sendWhatsAppMessage(phone, msg).catch(err => console.error('[Notify] Failed to notify', phone, err.message));
+    }
+  } catch (err) {
+    console.error('[Notify] Staff notification error:', err.message);
+  }
+}
+
+// ============================================================
+// Auto WhatsApp status updates to tenants
+// ============================================================
+const STATUS_MESSAGES = {
+  in_progress: (name, title, uuid) => `Hi ${name}, just to let you know we're looking into your ${title} now. Ref: ${uuid}`,
+  escalated: (name, title, uuid) => `Hi ${name}, we've escalated your ${title} to our maintenance team for priority attention. Ref: ${uuid}`,
+  resolved: (name, title, uuid) => `Hi ${name}, your ${title} has been resolved. If there are any problems, just message me again. Ref: ${uuid}`,
+};
+
+async function sendStatusUpdate(issueId, newStatus) {
+  try {
+    const db = getDb();
+    const setting = db.prepare("SELECT value FROM settings WHERE key = 'auto_status_updates'").get();
+    if (setting?.value !== 'true') { db.close(); return; }
+
+    const issue = db.prepare(`
+      SELECT i.*, t.name as tenant_name, t.phone as tenant_phone
+      FROM issues i LEFT JOIN tenants t ON i.tenant_id = t.id WHERE i.id = ?
+    `).get(issueId);
+    db.close();
+
+    if (!issue || !issue.tenant_phone) return;
+    const msgFn = STATUS_MESSAGES[newStatus];
+    if (!msgFn) return;
+
+    const firstName = issue.tenant_name?.split(' ')[0] || 'there';
+    const msg = msgFn(firstName, issue.title || 'maintenance issue', issue.uuid);
+    await sendWhatsAppMessage(issue.tenant_phone, msg);
+    console.log(`[Status Update] Sent ${newStatus} update to ${issue.tenant_phone} for issue ${issue.uuid}`);
+  } catch (err) {
+    console.error('[Status Update] Error:', err.message);
+  }
+}
+
+module.exports = { processIncomingMessage, sendWhatsAppMessage, sendStaffResponse, downloadWhatsAppMedia, sendStatusUpdate, notifyStaff };

@@ -60,4 +60,20 @@ export const api = {
 
   getSettings: () => request('/settings'),
   updateSettings: (data) => request('/settings', { method: 'PUT', body: JSON.stringify(data) }),
+
+  // Contractors
+  getContractors: () => request('/contractors'),
+  createContractor: (data) => request('/contractors', { method: 'POST', body: JSON.stringify(data) }),
+  updateContractor: (id, data) => request(`/contractors/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  getContractorQuotes: (id) => request(`/contractors/${id}/quotes`),
+
+  // Quotes
+  getIssueQuotes: (issueId) => request(`/contractors/issues/${issueId}/quotes`),
+  createQuote: (issueId, data) => request(`/contractors/issues/${issueId}/quotes`, { method: 'POST', body: JSON.stringify(data) }),
+  updateQuote: (id, data) => request(`/contractors/quotes/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  generateJobBrief: (issueId) => request(`/contractors/issues/${issueId}/job-brief`, { method: 'POST' }),
+
+  // Budgets
+  getBudgets: (year) => request(`/budgets?year=${year || new Date().getFullYear()}`),
+  setBudget: (data) => request('/budgets', { method: 'PUT', body: JSON.stringify(data) }),
 };

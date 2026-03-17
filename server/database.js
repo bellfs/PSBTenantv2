@@ -114,6 +114,30 @@ async function initialiseDatabase() {
     FOREIGN KEY (issue_id) REFERENCES issues(id)
   )`);
 
+  db.exec(`CREATE TABLE IF NOT EXISTS contractors (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, trade TEXT NOT NULL,
+    phone TEXT, email TEXT, notes TEXT, active INTEGER DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  db.exec(`CREATE TABLE IF NOT EXISTS quotes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, issue_id INTEGER NOT NULL,
+    contractor_id INTEGER NOT NULL, description TEXT, amount REAL,
+    status TEXT DEFAULT 'requested', notes TEXT,
+    quoted_at DATETIME, approved_at DATETIME, completed_at DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (issue_id) REFERENCES issues(id),
+    FOREIGN KEY (contractor_id) REFERENCES contractors(id)
+  )`);
+
+  db.exec(`CREATE TABLE IF NOT EXISTS property_budgets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, property_id INTEGER NOT NULL,
+    year INTEGER NOT NULL, annual_budget REAL NOT NULL DEFAULT 0, notes TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (property_id) REFERENCES properties(id),
+    UNIQUE(property_id, year)
+  )`);
+
   // Migrate existing DBs (safe to run multiple times)
   const cols = [
     ['issues','estimated_cost','ALTER TABLE issues ADD COLUMN estimated_cost REAL DEFAULT 0'],
@@ -123,6 +147,7 @@ async function initialiseDatabase() {
     ['issues','final_notes','ALTER TABLE issues ADD COLUMN final_notes TEXT'],
     ['issues','attended_by','ALTER TABLE issues ADD COLUMN attended_by TEXT'],
     ['issues','resolution_notes','ALTER TABLE issues ADD COLUMN resolution_notes TEXT'],
+    ['staff','phone','ALTER TABLE staff ADD COLUMN phone TEXT'],
   ];
   for (const [t,c,s] of cols) {
     try { db.prepare(`SELECT ${c} FROM ${t} LIMIT 0`).all(); } catch(e) {
@@ -154,6 +179,8 @@ async function initialiseDatabase() {
     ['escalation_email', process.env.ESCALATION_EMAIL || 'admin@52oldelvet.com'],
     ['bot_greeting', "Hey! I'm the PSB Properties maintenance bot."],
     ['bot_escalation_message', "Escalated to our team. Ref: {ref}. They'll be in touch shortly."],
+    ['auto_status_updates', 'true'],
+    ['staff_notify_phones', ''],
   ]) { db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)').run(k, v); }
   if (process.env.LLM_PROVIDER) db.prepare('UPDATE settings SET value = ? WHERE key = ?').run(process.env.LLM_PROVIDER, 'llm_provider');
   if (process.env.OPENAI_API_KEY) db.prepare('UPDATE settings SET value = ? WHERE key = ?').run(process.env.OPENAI_API_KEY, 'openai_api_key');
@@ -173,6 +200,17 @@ async function initialiseDatabase() {
       ['24 Hallgarth Street','24 Hallgarth Street, Durham','DH1 3AT',1],
     ]) { db.prepare('INSERT INTO properties (name, address, postcode, num_units) VALUES (?, ?, ?, ?)').run(n,a,p,u); }
     console.log('  Properties seeded');
+  }
+
+  // Seed contractors
+  if (!db.prepare("SELECT id FROM contractors WHERE name = 'Tony the Plumber'").get()) {
+    for (const [name, trade, notes] of [
+      ['Tony the Plumber', 'plumbing', 'Regular plumber'],
+      ['Neville the Joiner', 'joinery', 'Regular joiner'],
+      ['Paul Holmes', 'electrical', 'Electrician'],
+      ['Roofing Masters', 'roofing', 'Roofing contractor'],
+    ]) { db.prepare('INSERT INTO contractors (name, trade, notes) VALUES (?, ?, ?)').run(name, trade, notes); }
+    console.log('  Contractors seeded');
   }
 
   console.log('  Database initialised successfully');

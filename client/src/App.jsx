@@ -11,6 +11,7 @@ import Tenants from './pages/Tenants';
 import TenantDetail from './pages/TenantDetail';
 import Analytics from './pages/Analytics';
 import Settings from './pages/Settings';
+import Contractors from './pages/Contractors';
 import Layout from './components/Layout';
 
 const AuthContext = createContext(null);
@@ -47,6 +48,7 @@ export default function App() {
             <Route path="properties/:id" element={<PropertyDetail />} />
             <Route path="tenants" element={<Tenants />} />
             <Route path="tenants/:id" element={<TenantDetail />} />
+            <Route path="contractors" element={<Contractors />} />
             <Route path="analytics" element={<Analytics />} />
             <Route path="settings" element={<Settings />} />
           </Route>

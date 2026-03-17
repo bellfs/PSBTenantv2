@@ -1,7 +1,7 @@
 const express = require('express');
 const { getDb } = require('../database');
 const { authenticate } = require('../middleware/auth');
-const { sendStaffResponse } = require('../services/whatsapp');
+const { sendStaffResponse, sendStatusUpdate } = require('../services/whatsapp');
 
 const router = express.Router();
 
@@ -77,10 +77,14 @@ router.get('/:id', authenticate, (req, res) => {
   } finally { db.close(); }
 });
 
-router.put('/:id', authenticate, (req, res) => {
+router.put('/:id', authenticate, async (req, res) => {
   const { status, priority, category, title, final_cost, final_notes, attended_by, resolution_notes, resolved_at } = req.body;
   const db = getDb();
   try {
+    // Get old status for comparison
+    const oldIssue = db.prepare('SELECT status FROM issues WHERE id = ?').get(req.params.id);
+    const oldStatus = oldIssue?.status;
+
     const updates = [], params = [];
     if (status) { updates.push('status = ?'); params.push(status); }
     if (priority) { updates.push('priority = ?'); params.push(priority); }
@@ -97,6 +101,11 @@ router.put('/:id', authenticate, (req, res) => {
     db.prepare(`UPDATE issues SET ${updates.join(', ')} WHERE id = ?`).run(...params);
     db.prepare('INSERT INTO activity_log (issue_id, action, details, performed_by) VALUES (?, ?, ?, ?)').run(req.params.id, 'updated', JSON.stringify(req.body), req.user.name);
     res.json({ success: true });
+
+    // Auto WhatsApp status update (async, non-blocking)
+    if (status && status !== oldStatus) {
+      sendStatusUpdate(parseInt(req.params.id), status).catch(err => console.error('[Status Update] Error:', err.message));
+    }
   } finally { db.close(); }
 });
 
