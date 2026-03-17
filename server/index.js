@@ -45,6 +45,21 @@ app.listen(PORT, async () => {
   console.log(`  ║  WhatsApp:     ${(hasWhatsApp ? 'SET' : 'MISSING').padEnd(31)}║`);
   console.log(`  ╚═══════════════════════════════════════════════╝\n`);
   if (!hasOpenAI && !hasAnthropic) console.warn('  ⚠ WARNING: No LLM API key. Set OPENAI_API_KEY or ANTHROPIC_API_KEY.');
+
+  // Auto-subscribe this app to the WABA for webhook delivery
+  if (process.env.WHATSAPP_BUSINESS_ACCOUNT_ID && process.env.WHATSAPP_ACCESS_TOKEN) {
+    try {
+      const axios = require('axios');
+      const r = await axios.post(
+        `https://graph.facebook.com/v22.0/${process.env.WHATSAPP_BUSINESS_ACCOUNT_ID}/subscribed_apps`,
+        {},
+        { headers: { 'Authorization': `Bearer ${process.env.WHATSAPP_ACCESS_TOKEN}` }, timeout: 10000 }
+      );
+      console.log('  ✅ App subscribed to WABA webhooks:', r.data);
+    } catch (err) {
+      console.error('  ⚠ WABA subscription failed:', err.response?.data?.error?.message || err.message);
+    }
+  }
 });
 
 module.exports = app;
