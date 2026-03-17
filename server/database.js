@@ -1,65 +1,49 @@
-const initSqlJs = require('sql.js');
+const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
 const bcrypt = require('bcryptjs');
 
-const DB_PATH = path.join(__dirname, 'data', 'maintenance.db');
-let SQL = null;
+// Support DATABASE_PATH env var for Railway Volumes (e.g. /data/maintenance.db)
+const DB_PATH = process.env.DATABASE_PATH || path.join(__dirname, 'data', 'maintenance.db');
 
-async function initSQL() {
-  if (!SQL) SQL = await initSqlJs();
-  return SQL;
-}
+// Singleton database connection - stays open for the lifetime of the process
+let _db = null;
 
-function saveDb(rawDb) {
-  try {
-    const data = rawDb.export();
+function getRawDb() {
+  if (!_db) {
     const dir = path.dirname(DB_PATH);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(DB_PATH, Buffer.from(data));
-  } catch (err) {
-    console.error('[DB] Save error:', err.message);
+    _db = new Database(DB_PATH);
+    _db.pragma('journal_mode = WAL');     // Write-Ahead Logging for better concurrent reads
+    _db.pragma('busy_timeout = 5000');    // Wait up to 5s if DB is locked
+    _db.pragma('foreign_keys = ON');
+    console.log(`  [DB] Connected to ${DB_PATH}`);
   }
+  return _db;
 }
 
+/**
+ * Returns a DB wrapper with the same API the rest of the app expects.
+ * Uses a singleton connection under the hood - close() is a safe no-op.
+ */
 function getDb() {
-  if (!SQL) throw new Error('SQL.js not initialised');
-  let rawDb;
-  if (fs.existsSync(DB_PATH)) {
-    rawDb = new SQL.Database(fs.readFileSync(DB_PATH));
-  } else {
-    rawDb = new SQL.Database();
-  }
-  const wrapper = {
-    exec(sql) { rawDb.run(sql); saveDb(rawDb); },
+  const db = getRawDb();
+  return {
+    exec(sql) { db.exec(sql); },
     prepare(sql) {
+      const stmt = db.prepare(sql);
       return {
-        run(...params) {
-          rawDb.run(sql, params);
-          const res = rawDb.exec('SELECT last_insert_rowid() as lastInsertRowid');
-          const lastId = res.length > 0 ? res[0].values[0][0] : 0;
-          saveDb(rawDb);
-          return { lastInsertRowid: lastId };
-        },
-        get(...params) {
-          const stmt = rawDb.prepare(sql);
-          try { if (params.length) stmt.bind(params); if (stmt.step()) return stmt.getAsObject(); return undefined; } finally { stmt.free(); }
-        },
-        all(...params) {
-          const results = [];
-          const stmt = rawDb.prepare(sql);
-          try { if (params.length) stmt.bind(params); while (stmt.step()) results.push(stmt.getAsObject()); return results; } finally { stmt.free(); }
-        }
+        run(...params) { return stmt.run(...params); },
+        get(...params) { return stmt.get(...params); },
+        all(...params) { return stmt.all(...params); },
       };
     },
-    pragma() {},
-    close() { saveDb(rawDb); rawDb.close(); }
+    pragma(str) { if (str) db.pragma(str); },
+    close() { /* no-op: singleton stays open */ },
   };
-  return wrapper;
 }
 
 async function initialiseDatabase() {
-  await initSQL();
   const db = getDb();
 
   db.exec(`CREATE TABLE IF NOT EXISTS properties (
@@ -130,7 +114,7 @@ async function initialiseDatabase() {
     FOREIGN KEY (issue_id) REFERENCES issues(id)
   )`);
 
-  // Migrate existing DBs
+  // Migrate existing DBs (safe to run multiple times)
   const cols = [
     ['issues','estimated_cost','ALTER TABLE issues ADD COLUMN estimated_cost REAL DEFAULT 0'],
     ['issues','estimated_materials','ALTER TABLE issues ADD COLUMN estimated_materials TEXT'],
@@ -168,7 +152,7 @@ async function initialiseDatabase() {
     ['openai_api_key', process.env.OPENAI_API_KEY || ''],
     ['escalation_threshold', '3'],
     ['escalation_email', process.env.ESCALATION_EMAIL || 'admin@52oldelvet.com'],
-    ['bot_greeting', "Hey! 👋 I'm the PSB Properties maintenance bot."],
+    ['bot_greeting', "Hey! I'm the PSB Properties maintenance bot."],
     ['bot_escalation_message', "Escalated to our team. Ref: {ref}. They'll be in touch shortly."],
   ]) { db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)').run(k, v); }
   if (process.env.LLM_PROVIDER) db.prepare('UPDATE settings SET value = ? WHERE key = ?').run(process.env.LLM_PROVIDER, 'llm_provider');
@@ -191,8 +175,11 @@ async function initialiseDatabase() {
     console.log('  Properties seeded');
   }
 
-  db.close();
   console.log('  Database initialised successfully');
 }
+
+// Graceful shutdown - close DB properly on process exit
+process.on('SIGTERM', () => { if (_db) { _db.close(); _db = null; } });
+process.on('SIGINT', () => { if (_db) { _db.close(); _db = null; } process.exit(0); });
 
 module.exports = { getDb, initialiseDatabase, DB_PATH };
