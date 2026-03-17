@@ -263,6 +263,23 @@ async function initialiseDatabase() {
     ]) { db.prepare('INSERT INTO properties (name, address, postcode, num_units) VALUES (?, ?, ?, ?)').run(n,a,p,u); }
     console.log('  Properties seeded');
   }
+  // Remove Markhim (not a real property) - migrate any linked records to 35 St Andrews Court
+  const markhim = db.prepare("SELECT id FROM properties WHERE name = 'Markhim'").get();
+  if (markhim) {
+    const stAndrews = db.prepare("SELECT id FROM properties WHERE name = '35 St Andrews Court'").get();
+    const targetId = stAndrews?.id || null;
+    if (targetId) {
+      db.prepare('UPDATE tenants SET property_id = ? WHERE property_id = ?').run(targetId, markhim.id);
+      db.prepare('UPDATE tenancies SET property_id = ? WHERE property_id = ?').run(targetId, markhim.id);
+      db.prepare('UPDATE issues SET property_id = ? WHERE property_id = ?').run(targetId, markhim.id);
+    }
+    try { db.prepare('DELETE FROM compliance_certificates WHERE property_id = ?').run(markhim.id); } catch(e) {}
+    try { db.prepare('DELETE FROM documents WHERE property_id = ?').run(markhim.id); } catch(e) {}
+    try { db.prepare('DELETE FROM property_budgets WHERE property_id = ?').run(markhim.id); } catch(e) {}
+    db.prepare('DELETE FROM properties WHERE id = ?').run(markhim.id);
+    console.log('  Removed Markhim property (migrated records to 35 St Andrews Court)');
+  }
+
   // Seed contractors
   if (!db.prepare("SELECT id FROM contractors WHERE name = 'Tony the Plumber'").get()) {
     for (const [name, trade, notes] of [
