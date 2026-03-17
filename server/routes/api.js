@@ -285,6 +285,26 @@ router.get('/health', async (req, res) => {
     db.close();
   } catch (e) {}
 
+  // Check WABA subscription
+  if (checks.whatsapp_configured && process.env.WHATSAPP_BUSINESS_ACCOUNT_ID) {
+    try {
+      const axios = require('axios');
+      const r = await axios.get(`https://graph.facebook.com/v22.0/${process.env.WHATSAPP_BUSINESS_ACCOUNT_ID}/subscribed_apps`, {
+        headers: { 'Authorization': `Bearer ${process.env.WHATSAPP_ACCESS_TOKEN}` }, timeout: 5000
+      });
+      checks.waba_subscription = r.data;
+    } catch (e) {
+      checks.waba_subscription_error = e.response?.data?.error?.message || e.message;
+    }
+  }
+
+  // Recent webhook activity
+  try {
+    const db2 = getDb();
+    checks.recent_webhooks = db2.prepare("SELECT action, details, created_at FROM activity_log WHERE action IN ('webhook_received','webhook_error') ORDER BY created_at DESC LIMIT 5").all();
+    db2.close();
+  } catch (e) {}
+
   const allOk = checks.server && checks.database && checks.whatsapp_api && checks.llm_configured;
   res.status(allOk ? 200 : 503).json({ status: allOk ? 'healthy' : 'unhealthy', checks });
 });
@@ -300,18 +320,26 @@ router.get('/webhook/whatsapp', (req, res) => {
 });
 
 router.post('/webhook/whatsapp', async (req, res) => {
+  // Log every incoming webhook for debugging
+  const db = getDb();
+  const hasMessages = !!req.body?.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
+  db.prepare('INSERT INTO activity_log (action, details, performed_by) VALUES (?, ?, ?)').run(
+    'webhook_received',
+    `has_messages=${hasMessages} | ${JSON.stringify(req.body).slice(0, 500)}`,
+    'system'
+  );
+  db.close();
   res.status(200).send('OK');
   try {
     await processIncomingMessage(req.body);
   } catch (err) {
     console.error('[Webhook] Error processing message:', err.message, err.response?.data || '');
-    // Store error in DB for dashboard visibility
     try {
-      const db = getDb();
-      db.prepare('INSERT INTO activity_log (action, details, performed_by) VALUES (?, ?, ?)').run(
+      const db2 = getDb();
+      db2.prepare('INSERT INTO activity_log (action, details, performed_by) VALUES (?, ?, ?)').run(
         'webhook_error', `${err.message}${err.response?.data ? ' | ' + JSON.stringify(err.response.data) : ''}`, 'system'
       );
-      db.close();
+      db2.close();
     } catch (logErr) { console.error('[Webhook] Failed to log error to DB:', logErr.message); }
   }
 });
