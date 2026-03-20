@@ -15,7 +15,7 @@ export default function Settings() {
   // Email state
   const [emailAccounts, setEmailAccounts] = useState([]);
   const [syncLog, setSyncLog] = useState([]);
-  const [imapForm, setImapForm] = useState({ email_address: 'info@psb.properties', host: 'imap.zoho.com', port: 993, username: 'info@psb.properties', password: '' });
+  const [imapForm, setImapForm] = useState({ email_address: 'info@psb.properties', host: 'imap.zoho.eu', port: 993, username: 'info@psb.properties', password: '' });
   const [emailLoading, setEmailLoading] = useState('');
   const [emailError, setEmailError] = useState('');
   const [testEmailStatus, setTestEmailStatus] = useState('');
@@ -331,7 +331,7 @@ export default function Settings() {
               <div className="form-group"><label className="form-label">Email Address</label>
                 <input className="form-input" value={imapForm.email_address} onChange={e=>setImapForm(f=>({...f,email_address:e.target.value}))} placeholder="info@psb.properties"/></div>
               <div className="form-group"><label className="form-label">IMAP Host</label>
-                <input className="form-input" value={imapForm.host} onChange={e=>setImapForm(f=>({...f,host:e.target.value}))} placeholder="imap.zoho.com"/></div>
+                <input className="form-input" value={imapForm.host} onChange={e=>setImapForm(f=>({...f,host:e.target.value}))} placeholder="imap.zoho.eu"/></div>
               <div className="form-group"><label className="form-label">Username</label>
                 <input className="form-input" value={imapForm.username} onChange={e=>setImapForm(f=>({...f,username:e.target.value}))} placeholder="info@psb.properties"/></div>
               <div className="form-group"><label className="form-label">Zoho App Password</label>

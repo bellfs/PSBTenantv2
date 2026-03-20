@@ -179,11 +179,16 @@ try {
 }
 
 async function testImapConnection(config) {
-  if (!ImapSimple) throw new Error('imap-simple package not installed');
+  if (!ImapSimple) throw new Error('imap-simple package not installed. The server needs to be redeployed.');
+  console.log(`[IMAP] Testing connection to ${config.host}:${config.port || 993} as ${config.username}`);
   const connection = await ImapSimple.connect({
-    imap: { host: config.host, port: config.port || 993, tls: true, user: config.username, password: config.password, authTimeout: 10000 }
+    imap: { host: config.host, port: config.port || 993, tls: true, user: config.username, password: config.password, authTimeout: 15000 },
+    onmail: () => {}
   });
+  // Verify we can open INBOX
+  await connection.openBox('INBOX');
   await connection.end();
+  console.log(`[IMAP] Connection test passed for ${config.username}`);
   return true;
 }
 
@@ -191,23 +196,29 @@ async function syncImapAccount(account) {
   if (!ImapSimple) return { processed: 0, matched: 0, issues: 0, error: 'imap-simple not installed' };
   const creds = JSON.parse(account.credentials);
 
+  console.log(`[IMAP] Syncing ${account.email_address} via ${creds.host}`);
+
   try {
     const connection = await ImapSimple.connect({
-      imap: { host: creds.host, port: creds.port || 993, tls: true, user: creds.username, password: creds.password, authTimeout: 15000 }
+      imap: { host: creds.host, port: creds.port || 993, tls: true, user: creds.username, password: creds.password, authTimeout: 15000 },
+      onmail: () => {}
     });
 
     await connection.openBox('INBOX');
 
-    // Search for emails from last 7 days
+    // Search for emails from last 7 days - pass Date object for IMAP compatibility
     const since = new Date(Date.now() - 7 * 86400000);
-    const searchCriteria = [['SINCE', since.toISOString().split('T')[0]]];
+    const searchCriteria = [['SINCE', since]];
     const fetchOptions = { bodies: ['HEADER', 'TEXT'], struct: true };
 
     const messages = await connection.search(searchCriteria, fetchOptions);
+    console.log(`[IMAP] Found ${messages.length} messages in last 7 days for ${account.email_address}`);
     let processed = 0, matched = 0, issuesCreated = 0;
 
     for (const msg of messages) {
-      const msgId = msg.attributes?.uid?.toString() || `imap-${Date.now()}-${Math.random()}`;
+      // Use account ID + UID for unique message ID across accounts
+      const uid = msg.attributes?.uid?.toString() || `${Date.now()}-${Math.random()}`;
+      const msgId = `imap-${account.id}-${uid}`;
       const db = getDb();
       const existing = db.prepare('SELECT id FROM email_sync_log WHERE message_id = ?').get(msgId);
       db.close();
@@ -224,6 +235,8 @@ async function syncImapAccount(account) {
       const fromEmail = emailMatch ? emailMatch[1] : from.trim();
       const fromName = emailMatch ? from.replace(/<.+?>/, '').trim().replace(/"/g, '') : '';
 
+      console.log(`[IMAP] Processing: from=${fromEmail} subject="${subject?.slice(0, 60)}"`);
+
       processed++;
       const result = await processEmail(account.id, msgId, fromEmail, fromName, subject, body);
       if (result.matched) matched++;
@@ -236,6 +249,7 @@ async function syncImapAccount(account) {
     db2.prepare('UPDATE email_accounts SET last_sync_at = CURRENT_TIMESTAMP WHERE id = ?').run(account.id);
     db2.close();
 
+    console.log(`[IMAP] Sync complete for ${account.email_address}: processed=${processed} matched=${matched} issues=${issuesCreated}`);
     return { processed, matched, issues: issuesCreated };
   } catch (e) {
     console.error('[IMAP] Sync error:', e.message);
