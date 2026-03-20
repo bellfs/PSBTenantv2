@@ -113,7 +113,6 @@ export const api = {
   triggerEmailSync: (id) => request(`/email/accounts/${id}/sync`, { method: 'POST' }),
   getEmailSyncLog: () => request('/email/sync-log'),
   scanInboxForComplaints: () => request('/email/scan-inbox', { method: 'POST' }),
-  connectGmailApp: (data) => request('/email/accounts/gmail-app', { method: 'POST', body: JSON.stringify(data) }),
 
   // Utilities
   getUtilityReadings: (params = {}) => { const qs = new URLSearchParams(params).toString(); return request(`/utilities/readings?${qs}`); },

@@ -1,7 +1,7 @@
 /**
  * Email Sync Service
- * Handles Gmail OAuth and IMAP email scanning for tenant issue detection.
- * Periodically scans connected email accounts, matches senders to tenants,
+ * Handles Gmail OAuth email scanning for tenant issue detection.
+ * Scans connected Gmail accounts, matches senders to tenants,
  * and uses AI to extract maintenance issues from emails.
  */
 
@@ -11,21 +11,20 @@ const { sendNewIssueEmail } = require('./email');
 
 // ===== GMAIL OAUTH =====
 
-let gmailAuth = null;
+let google = null;
 try {
-  const { google } = require('googleapis');
-  gmailAuth = google;
+  google = require('googleapis').google;
 } catch (e) {
-  console.log('[EmailSync] googleapis not installed - Gmail OAuth disabled');
+  console.log('[EmailSync] googleapis not installed - Gmail sync disabled');
 }
 
 function getGmailOAuth2Client() {
-  if (!gmailAuth) throw new Error('googleapis not installed');
+  if (!google) throw new Error('googleapis package not installed. Run: npm install googleapis');
   const clientId = process.env.GOOGLE_CLIENT_ID;
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
   const redirectUri = process.env.GOOGLE_REDIRECT_URI || 'https://maintenance.52oldelvet.com/api/email/accounts/gmail/callback';
-  if (!clientId || !clientSecret) throw new Error('GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET required');
-  return new gmailAuth.auth.OAuth2(clientId, clientSecret, redirectUri);
+  if (!clientId || !clientSecret) throw new Error('GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET environment variables are required. Set them in Railway.');
+  return new google.auth.OAuth2(clientId, clientSecret, redirectUri);
 }
 
 function getGmailAuthUrl() {
@@ -46,17 +45,17 @@ async function handleGmailCallback(code) {
   oauth2Client.setCredentials(tokens);
 
   // Get user email
-  const oauth2 = gmailAuth.google ? gmailAuth.oauth2({ version: 'v2', auth: oauth2Client }) : null;
   let email = 'unknown@gmail.com';
   try {
-    const gmail = gmailAuth.gmail({ version: 'v1', auth: oauth2Client });
+    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
     const profile = await gmail.users.getProfile({ userId: 'me' });
     email = profile.data.emailAddress;
   } catch (e) { console.log('[Gmail] Could not get profile:', e.message); }
 
-  // Store in DB
+  // Store in DB (replace existing for same email)
   const db = getDb();
   try {
+    db.prepare('DELETE FROM email_accounts WHERE email_address = ?').run(email);
     db.prepare('INSERT INTO email_accounts (provider, email_address, credentials, sync_enabled) VALUES (?, ?, ?, 1)')
       .run('gmail', email, JSON.stringify(tokens));
     console.log(`[Gmail] Connected: ${email}`);
@@ -65,7 +64,7 @@ async function handleGmailCallback(code) {
 }
 
 async function syncGmailAccount(account) {
-  if (!gmailAuth) return { processed: 0, matched: 0, issues: 0 };
+  if (!google) return { processed: 0, matched: 0, issues: 0, error: 'googleapis not installed' };
   const oauth2Client = getGmailOAuth2Client();
   const tokens = JSON.parse(account.credentials);
   oauth2Client.setCredentials(tokens);
@@ -80,14 +79,14 @@ async function syncGmailAccount(account) {
       db.close();
     } catch (e) {
       console.error('[Gmail] Token refresh failed:', e.message);
-      return { processed: 0, matched: 0, issues: 0, error: 'Token refresh failed' };
+      return { processed: 0, matched: 0, issues: 0, error: 'Token refresh failed - reconnect Gmail in Settings' };
     }
   }
 
-  const gmail = gmailAuth.gmail({ version: 'v1', auth: oauth2Client });
+  const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
 
-  // Get messages from last 24 hours
-  const after = Math.floor((Date.now() - 86400000) / 1000);
+  // Get messages from last 3 days (broader window for manual scans)
+  const after = Math.floor((Date.now() - 3 * 86400000) / 1000);
   const query = `after:${after} -from:me`;
 
   try {
@@ -113,16 +112,8 @@ async function syncGmailAccount(account) {
       const fromEmail = emailMatch ? emailMatch[1] : from.trim();
       const fromName = emailMatch ? from.replace(/<.+?>/, '').trim().replace(/"/g, '') : '';
 
-      // Get body text
-      let body = '';
-      if (fullMsg.data.payload?.body?.data) {
-        body = Buffer.from(fullMsg.data.payload.body.data, 'base64').toString('utf-8');
-      } else if (fullMsg.data.payload?.parts) {
-        const textPart = fullMsg.data.payload.parts.find(p => p.mimeType === 'text/plain');
-        if (textPart?.body?.data) {
-          body = Buffer.from(textPart.body.data, 'base64').toString('utf-8');
-        }
-      }
+      // Get body text (handle nested MIME parts)
+      let body = extractBodyText(fullMsg.data.payload);
 
       processed++;
       const result = await processEmail(account.id, msg.id, fromEmail, fromName, subject, body);
@@ -142,78 +133,40 @@ async function syncGmailAccount(account) {
   }
 }
 
-// ===== IMAP =====
+// Recursively extract plain text body from Gmail message payload
+function extractBodyText(payload) {
+  if (!payload) return '';
 
-let ImapSimple = null;
-try {
-  ImapSimple = require('imap-simple');
-} catch (e) {
-  console.log('[EmailSync] imap-simple not installed - IMAP disabled');
-}
-
-async function testImapConnection(config) {
-  if (!ImapSimple) throw new Error('imap-simple not installed');
-  const connection = await ImapSimple.connect({
-    imap: { host: config.host, port: config.port || 993, tls: true, user: config.username, password: config.password, authTimeout: 10000 }
-  });
-  await connection.end();
-  return true;
-}
-
-async function syncImapAccount(account) {
-  if (!ImapSimple) return { processed: 0, matched: 0, issues: 0 };
-  const creds = JSON.parse(account.credentials);
-
-  try {
-    const connection = await ImapSimple.connect({
-      imap: { host: creds.host, port: creds.port || 993, tls: true, user: creds.username, password: creds.password, authTimeout: 15000 }
-    });
-
-    await connection.openBox('INBOX');
-
-    // Search for emails from last 7 days
-    const since = new Date(Date.now() - 7 * 86400000);
-    const searchCriteria = [['SINCE', since.toISOString().split('T')[0]]];
-    const fetchOptions = { bodies: ['HEADER', 'TEXT'], struct: true };
-
-    const messages = await connection.search(searchCriteria, fetchOptions);
-    let processed = 0, matched = 0, issuesCreated = 0;
-
-    for (const msg of messages) {
-      const msgId = msg.attributes?.uid?.toString() || `imap-${Date.now()}-${Math.random()}`;
-      const db = getDb();
-      const existing = db.prepare('SELECT id FROM email_sync_log WHERE message_id = ?').get(msgId);
-      db.close();
-      if (existing) continue;
-
-      const header = msg.parts?.find(p => p.which === 'HEADER')?.body || {};
-      const from = (header.from || [''])[0];
-      const subject = (header.subject || [''])[0];
-
-      const textPart = msg.parts?.find(p => p.which === 'TEXT');
-      const body = textPart?.body || '';
-
-      const emailMatch = from.match(/<(.+?)>/);
-      const fromEmail = emailMatch ? emailMatch[1] : from.trim();
-      const fromName = emailMatch ? from.replace(/<.+?>/, '').trim().replace(/"/g, '') : '';
-
-      processed++;
-      const result = await processEmail(account.id, msgId, fromEmail, fromName, subject, body);
-      if (result.matched) matched++;
-      if (result.issueCreated) issuesCreated++;
-    }
-
-    await connection.end();
-
-    const db2 = getDb();
-    db2.prepare('UPDATE email_accounts SET last_sync_at = CURRENT_TIMESTAMP WHERE id = ?').run(account.id);
-    db2.close();
-
-    return { processed, matched, issues: issuesCreated };
-  } catch (e) {
-    console.error('[IMAP] Sync error:', e.message);
-    return { processed: 0, matched: 0, issues: 0, error: e.message };
+  // Direct body
+  if (payload.body?.data) {
+    return Buffer.from(payload.body.data, 'base64url').toString('utf-8');
   }
+
+  // Multipart - look for text/plain first, then text/html
+  if (payload.parts) {
+    // Try text/plain first
+    for (const part of payload.parts) {
+      if (part.mimeType === 'text/plain' && part.body?.data) {
+        return Buffer.from(part.body.data, 'base64url').toString('utf-8');
+      }
+    }
+    // Try nested multipart
+    for (const part of payload.parts) {
+      if (part.mimeType?.startsWith('multipart/')) {
+        const nested = extractBodyText(part);
+        if (nested) return nested;
+      }
+    }
+    // Fallback to text/html stripped of tags
+    for (const part of payload.parts) {
+      if (part.mimeType === 'text/html' && part.body?.data) {
+        const html = Buffer.from(part.body.data, 'base64url').toString('utf-8');
+        return html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+      }
+    }
+  }
+
+  return '';
 }
 
 // ===== SHARED EMAIL PROCESSING =====
@@ -264,7 +217,6 @@ async function processEmail(accountId, messageId, fromEmail, fromName, subject, 
               .run(result.lastInsertRowid, 'email_issue_created', `Auto-created from email by ${fromName} <${fromEmail}>`, 'system');
 
             issueCreated = true;
-            matchedTenantId = tenant.id;
 
             // Send new issue email notification
             const newIssue = db.prepare('SELECT * FROM issues WHERE id = ?').get(result.lastInsertRowid);
@@ -358,14 +310,8 @@ async function syncAllAccounts() {
   for (const account of accounts) {
     try {
       let result;
-      const creds = account.credentials ? JSON.parse(account.credentials) : {};
-      // Gmail accounts connected via App Password use IMAP, detect by checking for host field
-      if (account.provider === 'gmail' && creds.host) {
-        result = await syncImapAccount(account);
-      } else if (account.provider === 'gmail') {
+      if (account.provider === 'gmail') {
         result = await syncGmailAccount(account);
-      } else if (account.provider === 'imap') {
-        result = await syncImapAccount(account);
       }
       if (result) {
         totalProcessed += result.processed || 0;
@@ -373,7 +319,7 @@ async function syncAllAccounts() {
         totalIssues += result.issues || 0;
         results.push({ account: account.email_address, provider: account.provider, ...result });
         if (result.processed > 0 || result.error) {
-          console.log(`[EmailSync] ${account.provider}:${account.email_address} - processed:${result.processed} matched:${result.matched} issues:${result.issues}${result.error ? ' error:'+result.error : ''}`);
+          console.log(`[EmailSync] ${account.email_address} - processed:${result.processed} matched:${result.matched} issues:${result.issues}${result.error ? ' error:'+result.error : ''}`);
         }
       }
     } catch (e) {
@@ -408,9 +354,7 @@ async function scanAllAccountsDetailed() {
 
 function startSyncScheduler() {
   if (syncInterval) return;
-  // Run every 5 minutes
   syncInterval = setInterval(syncAllAccounts, 5 * 60 * 1000);
-  // Initial sync after 30 seconds
   setTimeout(syncAllAccounts, 30000);
   console.log('[EmailSync] Scheduler started (5-min interval)');
 }
@@ -423,8 +367,6 @@ module.exports = {
   getGmailAuthUrl,
   handleGmailCallback,
   syncGmailAccount,
-  testImapConnection,
-  syncImapAccount,
   syncAllAccounts: scanAllAccountsDetailed,
   startSyncScheduler,
   stopSyncScheduler,

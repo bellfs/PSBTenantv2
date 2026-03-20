@@ -39,29 +39,6 @@ router.get('/accounts/gmail/callback', async (req, res) => {
   }
 });
 
-// Add IMAP account
-router.post('/accounts/imap', authenticate, requireAdmin, async (req, res) => {
-  const { email_address, host, port, username, password } = req.body;
-  if (!email_address || !host || !username || !password) {
-    return res.status(400).json({ error: 'email_address, host, username, and password are required' });
-  }
-
-  try {
-    // Test connection first
-    await emailSync.testImapConnection({ host, port: port || 993, username, password });
-
-    const db = getDb();
-    try {
-      const credentials = JSON.stringify({ host, port: port || 993, username, password });
-      const result = db.prepare('INSERT INTO email_accounts (provider, email_address, credentials, sync_enabled) VALUES (?, ?, ?, 1)')
-        .run('imap', email_address, credentials);
-      res.json({ id: result.lastInsertRowid, email_address, provider: 'imap' });
-    } finally { db.close(); }
-  } catch (e) {
-    res.status(400).json({ error: `Connection test failed: ${e.message}` });
-  }
-});
-
 // Toggle email account sync
 router.put('/accounts/:id', authenticate, requireAdmin, (req, res) => {
   const { sync_enabled } = req.body;
@@ -82,8 +59,8 @@ router.delete('/accounts/:id', authenticate, requireAdmin, (req, res) => {
   } finally { db.close(); }
 });
 
-// Trigger manual sync
-router.post('/accounts/:id/sync', authenticate, requireAdmin, async (req, res) => {
+// Trigger manual sync for a specific account
+router.post('/accounts/:id/sync', authenticate, async (req, res) => {
   const db = getDb();
   let account;
   try {
@@ -93,55 +70,17 @@ router.post('/accounts/:id/sync', authenticate, requireAdmin, async (req, res) =
   if (!account) return res.status(404).json({ error: 'Account not found' });
 
   try {
-    let result;
-    const creds = account.credentials ? JSON.parse(account.credentials) : {};
-    // Gmail accounts with host field are App Password (IMAP) accounts
-    if (account.provider === 'gmail' && creds.host) {
-      result = await emailSync.syncImapAccount(account);
-    } else if (account.provider === 'gmail') {
-      result = await emailSync.syncGmailAccount(account);
-    } else if (account.provider === 'imap') {
-      result = await emailSync.syncImapAccount(account);
-    }
+    const result = await emailSync.syncGmailAccount(account);
     res.json(result);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
 
-// Connect Gmail via App Password (IMAP) - simplified setup for admin@52oldelvet.com
-router.post('/accounts/gmail-app', authenticate, requireAdmin, async (req, res) => {
-  const { email_address, app_password } = req.body;
-  if (!email_address || !app_password) {
-    return res.status(400).json({ error: 'Email address and app password are required' });
-  }
-
-  const config = { host: 'imap.gmail.com', port: 993, username: email_address, password: app_password };
-
-  try {
-    // Test connection first
-    await emailSync.testImapConnection(config);
-
-    const db = getDb();
-    try {
-      // Remove any existing account for this email to avoid duplicates
-      db.prepare('DELETE FROM email_accounts WHERE email_address = ?').run(email_address);
-      const credentials = JSON.stringify(config);
-      const result = db.prepare('INSERT INTO email_accounts (provider, email_address, credentials, sync_enabled) VALUES (?, ?, ?, 1)')
-        .run('gmail', email_address, credentials);
-      console.log(`[Gmail App] Connected: ${email_address}`);
-      res.json({ id: result.lastInsertRowid, email_address, provider: 'gmail' });
-    } finally { db.close(); }
-  } catch (e) {
-    console.error('[Gmail App] Connection test failed:', e.message);
-    res.status(400).json({ error: `Connection failed: ${e.message}. Make sure you're using a Google App Password (not your regular password) and IMAP is enabled in Gmail settings.` });
-  }
-});
-
 // Scan all connected inboxes for tenant complaints (triggered from Issues page)
 router.post('/scan-inbox', authenticate, async (req, res) => {
   try {
-    const result = await emailSync.scanAllAccounts();
+    const result = await emailSync.syncAllAccounts();
     res.json(result);
   } catch (e) {
     console.error('[EmailScan] Error:', e.message);
