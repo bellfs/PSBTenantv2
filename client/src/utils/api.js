@@ -63,6 +63,7 @@ export const api = {
   exportAllIssues: () => downloadFile('/analytics/export', 'maintenance-export.csv'),
 
   getSettings: () => request('/settings'),
+  testEmail: () => request('/settings/test-email', { method: 'POST' }),
   updateSettings: (data) => request('/settings', { method: 'PUT', body: JSON.stringify(data) }),
 
   // Contractors

@@ -18,6 +18,7 @@ export default function Settings() {
   const [imapForm, setImapForm] = useState({ email_address: '', host: 'imap.zoho.com', port: 993, username: '', password: '' });
   const [emailLoading, setEmailLoading] = useState('');
   const [emailError, setEmailError] = useState('');
+  const [testEmailStatus, setTestEmailStatus] = useState('');
 
   // Check URL params for Gmail callback result
   useEffect(() => {
@@ -140,6 +141,31 @@ export default function Settings() {
           <input className="form-input" value={settings.staff_notify_phones||''} onChange={e=>setSettings(s=>({...s,staff_notify_phones:e.target.value}))} placeholder="+447700900001, +447700900002"/>
         </div>
         <button className="btn btn-primary" style={{marginTop:12}} onClick={saveSettings}><Save size={15}/> {saved ? 'Saved!' : 'Save'}</button>
+
+        <div style={{marginTop:24,paddingTop:20,borderTop:'1px solid rgba(255,255,255,0.06)'}}>
+          <label className="form-label">Test Email Notifications</label>
+          <p style={{fontSize:12,color:'var(--text-muted)',marginBottom:10}}>Send a test email to verify SMTP is configured correctly. The test email will be sent to the escalation email address.</p>
+          <button
+            className="btn btn-ghost"
+            style={{gap:6}}
+            onClick={async () => {
+              setTestEmailStatus('sending');
+              try {
+                const r = await api.testEmail();
+                setTestEmailStatus(r.message || 'Test email sent!');
+              } catch (e) {
+                setTestEmailStatus('Error: ' + e.message);
+              }
+              setTimeout(() => setTestEmailStatus(''), 8000);
+            }}
+            disabled={testEmailStatus === 'sending'}
+          >
+            <Mail size={15}/> {testEmailStatus === 'sending' ? 'Sending...' : 'Send Test Email'}
+          </button>
+          {testEmailStatus && testEmailStatus !== 'sending' && (
+            <p style={{fontSize:12,marginTop:8,color:testEmailStatus.startsWith('Error') ? 'var(--danger)' : 'var(--success)'}}>{testEmailStatus}</p>
+          )}
+        </div>
       </div></div>}
 
       {tab === 'email' && <div>

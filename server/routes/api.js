@@ -322,6 +322,30 @@ router.get('/staff-list', authenticate, (req, res) => {
   try { res.json(db.prepare('SELECT id, name, role FROM staff WHERE active = 1').all()); } finally { db.close(); }
 });
 
+// ===== TEST EMAIL =====
+router.post('/settings/test-email', authenticate, requireAdmin, async (req, res) => {
+  const { sendNewIssueEmail } = require('../services/email');
+  try {
+    const testIssue = {
+      id: 0, uuid: 'TEST-001', title: 'Test Issue - Email Verification',
+      status: 'open', priority: 'medium', category: 'test',
+      ai_diagnosis: 'This is a test email to verify SMTP configuration is working.',
+      estimated_cost: 0, flat_number: 'Test', created_at: new Date().toISOString()
+    };
+    const testTenant = { name: 'Test User', phone: '0000000000' };
+    const testProperty = { name: 'Test Property' };
+    const testMessages = [{
+      sender: 'tenant', content: 'This is a test message to verify email delivery.',
+      created_at: new Date().toISOString()
+    }];
+    await sendNewIssueEmail({ issue: testIssue, tenant: testTenant, property: testProperty, messages: testMessages, attachments: [] });
+    res.json({ success: true, message: 'Test email sent to ' + (process.env.ESCALATION_EMAIL || 'admin@52oldelvet.com') });
+  } catch (err) {
+    console.error('[Test Email] Error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // ===== HEALTH CHECK =====
 router.get('/health', async (req, res) => {
   const checks = {
