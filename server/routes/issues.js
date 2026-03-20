@@ -64,7 +64,14 @@ router.get('/stats', authenticate, (req, res) => {
       total_final_cost: db.prepare('SELECT COALESCE(SUM(final_cost),0) as c FROM issues WHERE final_cost IS NOT NULL').get().c,
       by_category: db.prepare("SELECT category, COUNT(*) as count FROM issues WHERE status NOT IN ('resolved','closed') AND category IS NOT NULL GROUP BY category ORDER BY count DESC").all(),
       by_property: db.prepare("SELECT p.name, COUNT(*) as count FROM issues i LEFT JOIN properties p ON i.property_id = p.id WHERE i.status NOT IN ('resolved','closed') GROUP BY p.name ORDER BY count DESC").all(),
-      recent_escalations: db.prepare("SELECT i.*, t.name as tenant_name, p.name as property_name FROM issues i LEFT JOIN tenants t ON i.tenant_id = t.id LEFT JOIN properties p ON i.property_id = p.id WHERE i.status = 'escalated' ORDER BY i.escalated_at DESC LIMIT 5").all()
+      recent_escalations: db.prepare("SELECT i.*, t.name as tenant_name, p.name as property_name FROM issues i LEFT JOIN tenants t ON i.tenant_id = t.id LEFT JOIN properties p ON i.property_id = p.id WHERE i.status = 'escalated' ORDER BY i.escalated_at DESC LIMIT 5").all(),
+      recent_issues: db.prepare(`
+        SELECT i.id, i.uuid, i.title, i.status, i.priority, i.category, i.created_at,
+          t.name as tenant_name, p.name as property_name,
+          (SELECT file_path FROM attachments WHERE issue_id = i.id LIMIT 1) as thumbnail
+        FROM issues i LEFT JOIN tenants t ON i.tenant_id = t.id LEFT JOIN properties p ON i.property_id = p.id
+        ORDER BY i.created_at DESC LIMIT 8
+      `).all()
     });
   } finally { db.close(); }
 });

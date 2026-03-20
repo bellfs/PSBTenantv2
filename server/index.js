@@ -23,6 +23,7 @@ app.use('/api/issues', require('./routes/issues'));
 app.use('/api/contractors', require('./routes/contractors'));
 app.use('/api/email', require('./routes/email'));
 app.use('/api/compliance', require('./routes/compliance'));
+app.use('/api/utilities', require('./routes/utilities'));
 app.use('/api', require('./routes/api'));
 
 const clientBuild = path.join(__dirname, '..', 'client', 'dist');

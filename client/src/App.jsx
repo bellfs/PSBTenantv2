@@ -14,6 +14,7 @@ import Settings from './pages/Settings';
 import Contractors from './pages/Contractors';
 import Compliance from './pages/Compliance';
 import IssueTimeline from './pages/IssueTimeline';
+import Utilities from './pages/Utilities';
 import Layout from './components/Layout';
 
 const AuthContext = createContext(null);
@@ -54,6 +55,7 @@ export default function App() {
             <Route path="contractors" element={<Contractors />} />
             <Route path="compliance" element={<Compliance />} />
             <Route path="analytics" element={<Analytics />} />
+            <Route path="utilities" element={<Utilities />} />
             <Route path="settings" element={<Settings />} />
           </Route>
         </Routes>

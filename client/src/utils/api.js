@@ -112,4 +112,16 @@ export const api = {
   deleteEmailAccount: (id) => request(`/email/accounts/${id}`, { method: 'DELETE' }),
   triggerEmailSync: (id) => request(`/email/accounts/${id}/sync`, { method: 'POST' }),
   getEmailSyncLog: () => request('/email/sync-log'),
+
+  // Utilities
+  getUtilityReadings: (params = {}) => { const qs = new URLSearchParams(params).toString(); return request(`/utilities/readings?${qs}`); },
+  saveUtilityReading: (data) => request('/utilities/readings', { method: 'POST', body: JSON.stringify(data) }),
+  saveUtilityReadingsBulk: (readings) => request('/utilities/readings/bulk', { method: 'POST', body: JSON.stringify({ readings }) }),
+  getUtilityRates: () => request('/utilities/rates'),
+  saveUtilityRate: (data) => request('/utilities/rates', { method: 'POST', body: JSON.stringify(data) }),
+  getUtilityAnalytics: (year) => request(`/utilities/analytics?year=${year || new Date().getFullYear()}`),
+  getUtilityAlerts: (year) => request(`/utilities/alerts?year=${year || new Date().getFullYear()}`),
+  getUtilityFairUsage: () => request('/utilities/fair-usage'),
+  saveUtilityFairUsage: (data) => request('/utilities/fair-usage', { method: 'POST', body: JSON.stringify(data) }),
+  checkUtilityOverusage: (month, year) => request('/utilities/check-overusage', { method: 'POST', body: JSON.stringify({ month, year }) }),
 };

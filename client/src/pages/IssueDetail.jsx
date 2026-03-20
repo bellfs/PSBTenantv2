@@ -526,8 +526,8 @@ export default function IssueDetail() {
                   <div key={m.id} className={`chat-bubble ${m.sender}`}>
                     <div className="chat-sender">{m.sender==='tenant'?issue.tenant_name:m.sender==='bot'?'AI Bot':'Staff'}</div>
                     {m.message_type === 'image' && attachments?.find(a => a.message_id === m.id) && (
-                      <a href={attachments.find(a => a.message_id === m.id).file_path} target="_blank" rel="noopener noreferrer">
-                        <img src={attachments.find(a => a.message_id === m.id).file_path} alt="Photo" style={{maxWidth:'100%',maxHeight:200,borderRadius:6,marginBottom:4,display:'block'}}/>
+                      <a href={attachments.find(a => a.message_id === m.id).file_path} target="_blank" rel="noopener noreferrer" style={{display:'inline-block',overflow:'hidden',borderRadius:6,marginBottom:4}}>
+                        <img src={attachments.find(a => a.message_id === m.id).file_path} alt="Photo" style={{maxWidth:'100%',maxHeight:200,borderRadius:6,display:'block',transition:'transform 0.2s ease, filter 0.2s ease',cursor:'pointer'}} onMouseEnter={e => { e.target.style.transform='scale(1.03)'; e.target.style.filter='brightness(1.1)'; }} onMouseLeave={e => { e.target.style.transform='scale(1)'; e.target.style.filter='brightness(1)'; }} onError={e => { e.target.style.display='none'; const placeholder = document.createElement('div'); placeholder.style.cssText='width:200px;height:140px;background:var(--bg-input);border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--text-muted)'; placeholder.textContent='Image unavailable'; e.target.parentNode.appendChild(placeholder); }}/>
                       </a>
                     )}
                     <div style={{whiteSpace:'pre-wrap'}}>{m.content}</div>
@@ -554,9 +554,9 @@ export default function IssueDetail() {
                   <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill, minmax(180px, 1fr))',gap:12}}>
                     {photos.map(p => (
                       <div key={p.id} style={{background:'var(--bg-secondary)',borderRadius:8,overflow:'hidden',border:'1px solid var(--border-light)'}}>
-                        <a href={p.file_path} target="_blank" rel="noopener noreferrer">
-                          <img src={p.file_path} alt="Tenant photo" style={{width:'100%',height:140,objectFit:'cover',display:'block'}} onError={e => { e.target.style.display='none'; e.target.nextSibling.style.display='flex'; }}/>
-                          <div style={{height:140,background:'var(--bg-input)',alignItems:'center',justifyContent:'center',fontSize:12,color:'var(--text-muted)',display:'none'}}><Image size={24} style={{opacity:0.4}}/></div>
+                        <a href={p.file_path} target="_blank" rel="noopener noreferrer" style={{display:'block',overflow:'hidden'}}>
+                          <img src={p.file_path} alt="Tenant photo" style={{width:'100%',height:140,objectFit:'cover',display:'block',transition:'transform 0.2s ease, filter 0.2s ease',cursor:'pointer'}} onError={e => { e.target.style.display='none'; e.target.nextSibling.style.display='flex'; }} onMouseEnter={e => { e.target.style.transform='scale(1.05)'; e.target.style.filter='brightness(1.1)'; }} onMouseLeave={e => { e.target.style.transform='scale(1)'; e.target.style.filter='brightness(1)'; }}/>
+                          <div style={{height:140,background:'var(--bg-input)',alignItems:'center',justifyContent:'center',fontSize:12,color:'var(--text-muted)',display:'none',flexDirection:'column',gap:6}}><Image size={24} style={{opacity:0.4}}/><span>Image unavailable</span></div>
                         </a>
                         {p.ai_analysis && (() => {
                           try {

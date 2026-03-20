@@ -195,6 +195,68 @@ async function initialiseDatabase() {
   db.exec('CREATE INDEX IF NOT EXISTS idx_tenants_email ON tenants(email)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_email_sync_msg ON email_sync_log(message_id)');
 
+  // ===== UTILITIES MANAGEMENT TABLES =====
+  db.exec(`CREATE TABLE IF NOT EXISTS meter_readings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    property_id INTEGER NOT NULL,
+    property_name TEXT,
+    meter_type TEXT NOT NULL,
+    mprn TEXT,
+    mpan TEXT,
+    water_ref TEXT,
+    month INTEGER NOT NULL,
+    year INTEGER NOT NULL,
+    reading REAL,
+    usage_kwh REAL DEFAULT 0,
+    cost REAL DEFAULT 0,
+    change_vs_prev REAL DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (property_id) REFERENCES properties(id),
+    UNIQUE(property_id, meter_type, month, year, property_name)
+  )`);
+
+  db.exec(`CREATE TABLE IF NOT EXISTS utility_rates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    rate_type TEXT NOT NULL,
+    rate_value REAL NOT NULL,
+    effective_from DATE NOT NULL,
+    effective_to DATE,
+    notes TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  db.exec(`CREATE TABLE IF NOT EXISTS utility_alerts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    property_id INTEGER NOT NULL,
+    meter_type TEXT NOT NULL,
+    month INTEGER NOT NULL,
+    year INTEGER NOT NULL,
+    usage_kwh REAL,
+    avg_usage REAL,
+    threshold_pct REAL DEFAULT 120,
+    alert_sent INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (property_id) REFERENCES properties(id)
+  )`);
+
+  db.exec(`CREATE TABLE IF NOT EXISTS fair_usage_limits (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    property_id INTEGER NOT NULL,
+    meter_type TEXT NOT NULL,
+    monthly_limit_kwh REAL,
+    academic_year TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (property_id) REFERENCES properties(id),
+    UNIQUE(property_id, meter_type, academic_year)
+  )`);
+
+  db.exec('CREATE INDEX IF NOT EXISTS idx_meter_readings_property ON meter_readings(property_id)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_meter_readings_period ON meter_readings(year, month)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_utility_alerts_property ON utility_alerts(property_id)');
+
+  // Migrate meter_readings unique constraint if table already exists without property_name in unique
+  // (safe to run - just adds the column to the unique constraint concept via the CREATE TABLE IF NOT EXISTS above)
+
   // Migrate existing DBs (safe to run multiple times)
   const cols = [
     ['issues','estimated_cost','ALTER TABLE issues ADD COLUMN estimated_cost REAL DEFAULT 0'],
@@ -295,6 +357,9 @@ async function initialiseDatabase() {
 
   // --- Seed tenants from spreadsheet data ---
   seedTenants(db);
+
+  // --- Seed meter readings from spreadsheet data ---
+  seedMeterReadings(db);
 
   console.log('  Database initialised successfully');
 }
@@ -539,6 +604,198 @@ function seedTenants(db) {
   const c2 = seedBatch(t2627, '2026-2027', '2026-07-01', '2027-06-30', false);
   const c3 = seedBatch(t52oe, '2025-2026', '2025-07-01', '2026-06-30', true);
   if (c1 + c2 + c3 > 0) console.log(`  Tenants seeded: ${c1} (25-26) + ${c2} (26-27) + ${c3} (52 OE)`);
+}
+
+function seedMeterReadings(db) {
+  // Skip if already seeded
+  if (db.prepare('SELECT id FROM meter_readings LIMIT 1').get()) return;
+
+  // Get 52 Old Elvet property ID
+  const oeRow = db.prepare("SELECT id FROM properties WHERE name = '52 Old Elvet'").get();
+  if (!oeRow) { console.log('  [Seed] 52 Old Elvet not found, skipping meter readings'); return; }
+  const oeId = oeRow.id;
+
+  // Ensure FFR properties exist
+  for (const [name, addr] of [
+    ['Flat 1 Church Hill', 'Flat 1 Church Hill, Durham'],
+    ['Flat 2 Church Hill', 'Flat 2 Church Hill, Durham'],
+    ['Flat 3 Church Hill', 'Flat 3 Church Hill, Durham'],
+    ['Flat 4 Church Hill', 'Flat 4 Church Hill, Durham'],
+    ['41 Old Elvet', '41 Old Elvet, Durham'],
+  ]) {
+    if (!db.prepare('SELECT id FROM properties WHERE name = ?').get(name)) {
+      db.prepare('INSERT INTO properties (name, address, postcode, num_units) VALUES (?, ?, ?, ?)').run(name, addr, 'DH1', 1);
+    }
+  }
+
+  const ffrIds = {};
+  for (const name of ['Flat 1 Church Hill','Flat 2 Church Hill','Flat 3 Church Hill','Flat 4 Church Hill','41 Old Elvet']) {
+    ffrIds[name] = db.prepare('SELECT id FROM properties WHERE name = ?').get(name)?.id;
+  }
+
+  const insert = db.prepare(`INSERT OR IGNORE INTO meter_readings
+    (property_id, property_name, meter_type, mprn, mpan, water_ref, month, year, reading, usage_kwh, cost)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+
+  // 52 OE apartment meter refs
+  const oeRefs = {
+    'Landlord Supply':       { mprn: null,           mpan: '15 8000 1565 600', water: null },
+    'The Villiers':          { mprn: '9363633108',   mpan: '15 8000 1565 489', water: '18FA2888 27' },
+    'The Barrington':        { mprn: '9363480906',   mpan: '15 8000 1565 521', water: '18FA2888 72' },
+    'The Egerton':           { mprn: '9363485804',   mpan: '15 8000 1565 498', water: '18FA2888 75' },
+    'The Wolsey':            { mprn: '1345210304',   mpan: '15 8000 1565 503', water: null },
+    'The Tunstall':          { mprn: '9363479304',   mpan: '15 8000 1565 512', water: '18MA222496' },
+    'The Montague':          { mprn: '9363756607',   mpan: '15 8000 1565 530', water: '18FA2888 76' },
+    'The Morton':            { mprn: '9363659508',   mpan: '15 8000 1565 540', water: '18FA2888 79' },
+    'The Gray':              { mprn: '9363915309',   mpan: '15 8000 1565 559', water: '18FA2888 71' },
+    'The Langley':           { mprn: '9363596903',   mpan: '15 8000 1565 568', water: '18FA2888 80' },
+    'The Kirkham':           { mprn: '9363613304',   mpan: '15 8000 1565 577', water: '18FA2888 74' },
+    'The Fordham':           { mprn: '9363691605',   mpan: '15 8000 1565 586', water: '18FA2888 77' },
+    'The Talbot Penthouse':  { mprn: '9363865601',   mpan: '15 8000 1565 595', water: '18FA2888 78' },
+  };
+
+  // Helper: insert reading for 52 OE apartment
+  function oeReading(aptName, meterType, month, year, reading, usage, cost) {
+    if (reading == null && usage == null && cost == null) return;
+    const refs = oeRefs[aptName] || {};
+    insert.run(oeId, aptName, meterType, refs.mprn || null, refs.mpan || null, refs.water || null,
+      month, year, reading, usage || 0, cost || 0);
+  }
+
+  // Helper: insert reading for FFR property
+  function ffrReading(propName, propId, meterType, month, year, reading, usage, cost) {
+    if (reading == null && usage == null && cost == null) return;
+    insert.run(propId, propName, meterType, null, null, null, month, year, reading, usage || 0, cost || 0);
+  }
+
+  // ===== 52 OE 2025 January =====
+  oeReading('Landlord Supply', 'electric', 1, 2025, 11746, 402, 111.186);
+  oeReading('The Villiers', 'gas', 1, 2025, 5083, 842, 349.75);
+  oeReading('The Villiers', 'electric', 1, 2025, 14127, 1678, 402.114);
+  oeReading('The Barrington', 'gas', 1, 2025, 4000, 274, 120.18);
+  oeReading('The Barrington', 'electric', 1, 2025, 7517, 104, 43.242);
+  oeReading('The Egerton', 'gas', 1, 2025, 8543, 108, 153.34);
+  oeReading('The Egerton', 'electric', 1, 2025, 7690, 118, 46.434);
+  oeReading('The Wolsey', 'gas', 1, 2025, 769, 4, 15.57);
+  oeReading('The Wolsey', 'electric', 1, 2025, 11979, 73, 36.174);
+  oeReading('The Tunstall', 'gas', 1, 2025, 1736, 46, 33.24);
+  oeReading('The Tunstall', 'electric', 1, 2025, 8306, 68, 35.034);
+  oeReading('The Montague', 'gas', 1, 2025, 2949, 123, 66.64);
+  oeReading('The Montague', 'electric', 1, 2025, 10602, 120, 46.89);
+  oeReading('The Morton', 'gas', 1, 2025, 4620, 75, 48.22);
+  oeReading('The Morton', 'electric', 1, 2025, 8390, 79, 37.542);
+  oeReading('The Gray', 'gas', 1, 2025, 2077, 237, 113.04);
+  oeReading('The Gray', 'electric', 1, 2025, 8079, 214, 68.322);
+  oeReading('The Langley', 'gas', 1, 2025, 3564, 256, 120.07);
+  oeReading('The Langley', 'electric', 1, 2025, 7993, 138, 50.994);
+  oeReading('The Kirkham', 'gas', 1, 2025, 2883, 158, 78.51);
+  oeReading('The Kirkham', 'electric', 1, 2025, 7871, 102, 42.786);
+  oeReading('The Fordham', 'gas', 1, 2025, 3426, 41, 32.85);
+  oeReading('The Fordham', 'electric', 1, 2025, 7910, 164, 56.922);
+  oeReading('The Talbot Penthouse', 'gas', 1, 2025, 2483, 80, 47.96);
+  oeReading('The Talbot Penthouse', 'electric', 1, 2025, 9789, 99, 42.102);
+
+  // ===== 52 OE 2025 February =====
+  oeReading('The Villiers', 'gas', 2, 2025, 5769, 686, 285.79);
+  oeReading('The Barrington', 'gas', 2, 2025, 4216, 216, 95.83);
+  oeReading('The Egerton', 'gas', 2, 2025, 8708, 165, 165.77);
+  oeReading('The Wolsey', 'gas', 2, 2025, 802, 33, 25.94);
+  oeReading('The Tunstall', 'gas', 2, 2025, 1808, 72, 42.33);
+  oeReading('The Montague', 'gas', 2, 2025, 3170, 221, 104.61);
+  oeReading('The Morton', 'gas', 2, 2025, 4651, 31, 28.70);
+  oeReading('The Gray', 'gas', 2, 2025, 2273, 196, 94.80);
+  oeReading('The Langley', 'gas', 2, 2025, 3786, 222, 104.72);
+  oeReading('The Kirkham', 'gas', 2, 2025, 3041, 158, 77.09);
+  oeReading('The Fordham', 'gas', 2, 2025, 3496, 70, 43.00);
+  oeReading('The Talbot Penthouse', 'gas', 2, 2025, 2799, 316, 141.83);
+
+  // ===== 52 OE 2026 January =====
+  oeReading('Landlord Supply', 'electric', 1, 2026, 16149, 685, 175.71);
+  oeReading('The Villiers', 'gas', 1, 2026, 6885, 373, 160.19);
+  oeReading('The Villiers', 'electric', 1, 2026, 19979, 542, 143.106);
+  oeReading('The Barrington', 'gas', 1, 2026, 5513, 349, 150.49);
+  oeReading('The Barrington', 'electric', 1, 2026, 9044, 196, 64.218);
+  oeReading('The Egerton', 'gas', 1, 2026, 9583, 248, 209.93);
+  oeReading('The Egerton', 'electric', 1, 2026, 9017, 196, 64.218);
+  oeReading('The Wolsey', 'gas', 1, 2026, 1587, 254, 116.61);
+  oeReading('The Wolsey', 'electric', 1, 2026, 13956, 506, 134.898);
+  oeReading('The Tunstall', 'gas', 1, 2026, 2322, 164, 80.93);
+  oeReading('The Tunstall', 'electric', 1, 2026, 9579, 235, 73.11);
+  oeReading('The Montague', 'gas', 1, 2026, 4642, 680, 291.76);
+  oeReading('The Montague', 'electric', 1, 2026, 12882, 532, 140.826);
+  oeReading('The Morton', 'gas', 1, 2026, 5172, 277, 129.86);
+  oeReading('The Morton', 'electric', 1, 2026, 9271, 138, 50.994);
+  oeReading('The Gray', 'gas', 1, 2026, 3203, 264, 123.95);
+  oeReading('The Gray', 'electric', 1, 2026, 9462, 127, 48.486);
+  oeReading('The Langley', 'gas', 1, 2026, 4827, 338, 153.21);
+  oeReading('The Langley', 'electric', 1, 2026, 9392, 195, 63.99);
+  oeReading('The Kirkham', 'gas', 1, 2026, 3947, 294, 133.47);
+  oeReading('The Kirkham', 'electric', 1, 2026, 8991, 221, 69.918);
+  oeReading('The Fordham', 'gas', 1, 2026, 4238, 251, 117.72);
+  oeReading('The Fordham', 'electric', 1, 2026, 9869, 174, 59.202);
+  oeReading('The Talbot Penthouse', 'gas', 1, 2026, 4110, 311, 141.32);
+  oeReading('The Talbot Penthouse', 'electric', 1, 2026, 11498, 261, 79.038);
+
+  // ===== 52 OE 2026 February =====
+  oeReading('The Villiers', 'gas', 2, 2026, 7032, 147, 67.94);
+  oeReading('The Barrington', 'gas', 2, 2026, 5679, 166, 75.62);
+  oeReading('The Egerton', 'gas', 2, 2026, 9776, 193, 177.08);
+  oeReading('The Wolsey', 'gas', 2, 2026, 1746, 159, 76.86);
+  oeReading('The Tunstall', 'gas', 2, 2026, 2417, 95, 51.63);
+  oeReading('The Montague', 'gas', 2, 2026, 5076, 434, 190.70);
+  oeReading('The Morton', 'gas', 2, 2026, 5295, 123, 65.88);
+  oeReading('The Gray', 'gas', 2, 2026, 3352, 149, 75.80);
+  oeReading('The Langley', 'gas', 2, 2026, 5033, 206, 98.25);
+  oeReading('The Kirkham', 'gas', 2, 2026, 4100, 153, 75.07);
+  oeReading('The Fordham', 'gas', 2, 2026, 4351, 113, 60.37);
+  oeReading('The Talbot Penthouse', 'gas', 2, 2026, 4305, 195, 92.92);
+
+  // ===== FFR Group 2025 January =====
+  ffrReading('Flat 1 Church Hill', ffrIds['Flat 1 Church Hill'], 'gas', 1, 2025, 9505, 241, 122.14);
+  ffrReading('Flat 1 Church Hill', ffrIds['Flat 1 Church Hill'], 'electric', 1, 2025, 16180, 146, 37.80);
+  ffrReading('Flat 2 Church Hill', ffrIds['Flat 2 Church Hill'], 'gas', 1, 2025, 8530, 249, 122.77);
+  ffrReading('Flat 2 Church Hill', ffrIds['Flat 2 Church Hill'], 'electric', 1, 2025, 18489, 268, 58.46);
+  ffrReading('Flat 3 Church Hill', ffrIds['Flat 3 Church Hill'], 'gas', 1, 2025, 7616, 310, 153.29);
+  ffrReading('Flat 3 Church Hill', ffrIds['Flat 3 Church Hill'], 'electric', 1, 2025, 16489, 237, 53.18);
+  ffrReading('Flat 4 Church Hill', ffrIds['Flat 4 Church Hill'], 'gas', 1, 2025, 10026, 112, 79.12);
+  ffrReading('Flat 4 Church Hill', ffrIds['Flat 4 Church Hill'], 'electric', 1, 2025, 15205, 118, 32.92);
+  ffrReading('41 Old Elvet', ffrIds['41 Old Elvet'], 'gas', 1, 2025, 7637, 0, 27.02);
+  ffrReading('41 Old Elvet', ffrIds['41 Old Elvet'], 'electric', 1, 2025, 20770, 657, 123.10);
+
+  // ===== FFR Group 2025 February =====
+  ffrReading('Flat 1 Church Hill', ffrIds['Flat 1 Church Hill'], 'gas', 2, 2025, 9768, 263, 128.64);
+  ffrReading('Flat 2 Church Hill', ffrIds['Flat 2 Church Hill'], 'gas', 2, 2025, 8826, 296, 139.63);
+  ffrReading('Flat 3 Church Hill', ffrIds['Flat 3 Church Hill'], 'gas', 2, 2025, 7946, 330, 158.66);
+  ffrReading('Flat 4 Church Hill', ffrIds['Flat 4 Church Hill'], 'gas', 2, 2025, 10274, 248, 130.81);
+  ffrReading('41 Old Elvet', ffrIds['41 Old Elvet'], 'gas', 2, 2025, 7647, 10, 31.06);
+
+  // ===== FFR Group 2026 January =====
+  ffrReading('Flat 1 Church Hill', ffrIds['Flat 1 Church Hill'], 'gas', 1, 2026, 10992, 194, 103.15);
+  ffrReading('Flat 1 Church Hill', ffrIds['Flat 1 Church Hill'], 'electric', 1, 2026, 18673, 208, 48.15);
+  ffrReading('Flat 2 Church Hill', ffrIds['Flat 2 Church Hill'], 'gas', 1, 2026, 10189, 66, 48.81);
+  ffrReading('Flat 2 Church Hill', ffrIds['Flat 2 Church Hill'], 'electric', 1, 2026, 22198, 208, 48.24);
+  ffrReading('Flat 3 Church Hill', ffrIds['Flat 3 Church Hill'], 'gas', 1, 2026, 9433, 147, 87.41);
+  ffrReading('Flat 3 Church Hill', ffrIds['Flat 3 Church Hill'], 'electric', 1, 2026, 19195, 181, 43.65);
+  ffrReading('Flat 4 Church Hill', ffrIds['Flat 4 Church Hill'], 'gas', 1, 2026, 11833, 189, 110.24);
+  ffrReading('Flat 4 Church Hill', ffrIds['Flat 4 Church Hill'], 'electric', 1, 2026, 17771, 146, 37.69);
+  ffrReading('41 Old Elvet', ffrIds['41 Old Elvet'], 'gas', 1, 2026, 8004, 193, 105.02);
+  ffrReading('41 Old Elvet', ffrIds['41 Old Elvet'], 'electric', 1, 2026, 25828, 595, 112.75);
+
+  // ===== FFR Group 2026 February =====
+  ffrReading('Flat 1 Church Hill', ffrIds['Flat 1 Church Hill'], 'gas', 2, 2026, 11228, 236, 117.73);
+  ffrReading('Flat 2 Church Hill', ffrIds['Flat 2 Church Hill'], 'gas', 2, 2026, 10423, 234, 114.57);
+  ffrReading('Flat 3 Church Hill', ffrIds['Flat 3 Church Hill'], 'gas', 2, 2026, 9639, 206, 108.54);
+  ffrReading('Flat 4 Church Hill', ffrIds['Flat 4 Church Hill'], 'gas', 2, 2026, 12286, 453, 213.66);
+
+  // Seed default utility rates
+  const insertRate = db.prepare('INSERT OR IGNORE INTO utility_rates (rate_type, rate_value, effective_from, notes) VALUES (?, ?, ?, ?)');
+  insertRate.run('gas_unit', 0.0415, '2024-01-01', 'Gas unit rate 4.15p/kWh');
+  insertRate.run('electric_unit', 0.245, '2024-01-01', 'Electric unit rate 24.50p/kWh');
+  insertRate.run('gas_standing', 0.2735, '2024-01-01', 'Gas standing charge 27.35p/day');
+  insertRate.run('electric_standing', 0.5335, '2024-01-01', 'Electric standing charge 53.35p/day');
+  insertRate.run('vat_rate', 0.05, '2024-01-01', 'VAT rate 5%');
+
+  console.log('  Meter readings and utility rates seeded');
 }
 
 // Graceful shutdown - close DB properly on process exit
