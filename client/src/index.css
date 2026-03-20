@@ -554,6 +554,21 @@ tr:last-child td { border-bottom: none; }
 .chart-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
 .chart-grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-bottom: 16px; }
 
+/* ===== MOBILE COPILOT BAR (hidden on desktop, shown on mobile via media query) ===== */
+.mobile-copilot-bar { display: none; }
+
+/* Copilot placeholder text fade animation */
+.cph {
+  transition: opacity 0.3s ease, transform 0.3s ease;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+  text-align: left;
+}
+.cph-in { opacity: 1; transform: translateY(0); }
+.cph-out { opacity: 0; transform: translateY(4px); }
+
 /* ===== MOBILE HEADER ===== */
 .mobile-header {
   display: none;
@@ -803,11 +818,11 @@ tr:last-child td { border-bottom: none; }
     top: 56px;
     left: 0;
     right: 0;
-    padding: 8px 16px;
-    background: rgba(8, 8, 20, 0.92);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    border-bottom: var(--glass-border);
+    padding: 8px 12px;
+    background: rgba(8, 8, 20, 0.95);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-bottom: 1px solid rgba(99,102,241,0.12);
     z-index: 49;
     gap: 8px;
     align-items: center;
@@ -816,24 +831,28 @@ tr:last-child td { border-bottom: none; }
     flex: 1;
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 9px 14px;
-    background: rgba(255,255,255,0.04);
-    border: 1px solid var(--border);
+    gap: 10px;
+    padding: 10px 14px;
+    background: linear-gradient(135deg, rgba(99,102,241,0.06) 0%, rgba(139,92,246,0.04) 100%);
+    border: 1px solid rgba(99,102,241,0.18);
     border-radius: var(--radius-md);
     color: var(--text-muted);
     font-size: 13px;
     font-family: var(--font-sans);
     cursor: pointer;
     transition: all 0.2s ease;
+    min-width: 0;
   }
-  .mobile-copilot-trigger:hover,
-  .mobile-copilot-trigger:focus {
+  .mobile-copilot-trigger:active {
     border-color: var(--accent);
-    background: rgba(99,102,241,0.06);
-    color: var(--text-secondary);
+    background: rgba(99,102,241,0.1);
+    transform: scale(0.98);
   }
-  .mobile-copilot-trigger svg { flex-shrink: 0; opacity: 0.5; }
+  .mobile-copilot-trigger svg {
+    flex-shrink: 0;
+    color: var(--accent-light);
+    opacity: 0.7;
+  }
 
   /* Adjust main content for search bar */
   .main-content { padding-top: 108px !important; }
@@ -864,8 +883,7 @@ tr:last-child td { border-bottom: none; }
   .utility-summary-grid { grid-template-columns: 1fr !important; }
 }
 
-/* Desktop-only: hide mobile copilot bar */
-.mobile-copilot-bar { display: none; }
+/* mobile-copilot-bar: shown/hidden via media queries in mobile block above */
 
 /* ===== CHECK-IN / CHECK-OUT ===== */
 .checkinout-room-card {
