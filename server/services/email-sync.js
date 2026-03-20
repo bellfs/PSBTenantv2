@@ -178,18 +178,46 @@ try {
   console.log('[EmailSync] imap-simple not installed - IMAP disabled');
 }
 
+function buildImapConfig(config) {
+  return {
+    imap: {
+      host: config.host,
+      port: config.port || 993,
+      tls: true,
+      user: config.username,
+      password: config.password,
+      authTimeout: 20000,
+      connTimeout: 20000,
+      tlsOptions: { rejectUnauthorized: false, servername: config.host },
+      keepalive: { interval: 10000, idleInterval: 300000, forceNoop: true }
+    }
+  };
+}
+
 async function testImapConnection(config) {
   if (!ImapSimple) throw new Error('imap-simple package not installed. The server needs to be redeployed.');
   console.log(`[IMAP] Testing connection to ${config.host}:${config.port || 993} as ${config.username}`);
-  const connection = await ImapSimple.connect({
-    imap: { host: config.host, port: config.port || 993, tls: true, user: config.username, password: config.password, authTimeout: 15000 },
-    onmail: () => {}
-  });
-  // Verify we can open INBOX
-  await connection.openBox('INBOX');
-  await connection.end();
-  console.log(`[IMAP] Connection test passed for ${config.username}`);
-  return true;
+  try {
+    const connection = await ImapSimple.connect(buildImapConfig(config));
+    // Verify we can open INBOX
+    await connection.openBox('INBOX');
+    await connection.end();
+    console.log(`[IMAP] Connection test passed for ${config.username}`);
+    return true;
+  } catch (e) {
+    console.error(`[IMAP] Connection test FAILED for ${config.username}@${config.host}: ${e.message}`);
+    // Give a more helpful error message
+    if (e.message.includes('AUTHENTICATIONFAILED') || e.message.includes('LOGIN')) {
+      throw new Error(`Authentication failed. Check your email/password. For Zoho, use an App Password from accounts.zoho.eu > Security > App Passwords. Also ensure IMAP is enabled in Zoho Mail Settings.`);
+    }
+    if (e.message.includes('ENOTFOUND') || e.message.includes('getaddrinfo')) {
+      throw new Error(`Cannot reach ${config.host}. For Zoho EU custom domains, try imappro.zoho.eu. For US accounts, try imappro.zoho.com.`);
+    }
+    if (e.message.includes('ETIMEDOUT') || e.message.includes('timeout')) {
+      throw new Error(`Connection timed out to ${config.host}. Try imappro.zoho.eu (EU) or imappro.zoho.com (US).`);
+    }
+    throw e;
+  }
 }
 
 async function syncImapAccount(account) {
@@ -199,10 +227,7 @@ async function syncImapAccount(account) {
   console.log(`[IMAP] Syncing ${account.email_address} via ${creds.host}`);
 
   try {
-    const connection = await ImapSimple.connect({
-      imap: { host: creds.host, port: creds.port || 993, tls: true, user: creds.username, password: creds.password, authTimeout: 15000 },
-      onmail: () => {}
-    });
+    const connection = await ImapSimple.connect(buildImapConfig(creds));
 
     await connection.openBox('INBOX');
 
