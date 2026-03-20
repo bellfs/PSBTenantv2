@@ -3,6 +3,26 @@ const path = require('path');
 const fs = require('fs');
 
 function getTransporter() {
+  // Support Gmail OAuth2 if configured, otherwise fall back to SMTP app password
+  if (process.env.GMAIL_CLIENT_ID && process.env.GMAIL_CLIENT_SECRET && process.env.GMAIL_REFRESH_TOKEN) {
+    console.log('[Email] Using Gmail OAuth2 transport');
+    return nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        type: 'OAuth2',
+        user: process.env.SMTP_USER,
+        clientId: process.env.GMAIL_CLIENT_ID,
+        clientSecret: process.env.GMAIL_CLIENT_SECRET,
+        refreshToken: process.env.GMAIL_REFRESH_TOKEN,
+        accessToken: process.env.GMAIL_ACCESS_TOKEN || undefined
+      }
+    });
+  }
+
+  if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
+    console.error('[Email] SMTP_USER and SMTP_PASS not set! Emails will fail.');
+  }
+
   return nodemailer.createTransport({
     host: process.env.SMTP_HOST || 'smtp.gmail.com',
     port: parseInt(process.env.SMTP_PORT || '587'),

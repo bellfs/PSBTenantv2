@@ -14,6 +14,7 @@ const OLD_ELVET_APARTMENTS = [
 ];
 
 const MIN_DIAGNOSIS_ROUNDS = 3;
+const CONVERSATION_GAP_MS = 10 * 60 * 60 * 1000; // 10 hours
 
 // Message deduplication cache (prevents duplicate webhook processing)
 const processedMessages = new Map();
@@ -76,6 +77,51 @@ async function downloadWhatsAppMedia(mediaId) {
     if (err.code === 'ECONNABORTED') console.error('[WhatsApp] Media download TIMED OUT for mediaId:', mediaId);
     return null;
   }
+}
+
+// ============================================================
+// AI-powered intent classification for returning tenants
+// ============================================================
+async function classifyTenantIntent(textContent, activeIssue, lastMessages) {
+  const recentConvo = lastMessages.slice(-6).map(m =>
+    `${m.sender === 'tenant' ? 'Tenant' : 'Bot'}: ${(m.content || '').slice(0, 150)}`
+  ).join('\n');
+
+  const prompt = `You are classifying a tenant's WhatsApp message to a property maintenance bot.
+
+EXISTING OPEN ISSUE:
+- Title: ${activeIssue.title}
+- Category: ${activeIssue.category || 'unknown'}
+- Status: ${activeIssue.status}
+- AI Diagnosis: ${(activeIssue.ai_diagnosis || '').slice(0, 200)}
+
+RECENT CONVERSATION ON THIS ISSUE:
+${recentConvo}
+
+NEW MESSAGE FROM TENANT:
+"${textContent}"
+
+Is this message:
+A) Continuing the SAME issue (providing more info, answering questions, following up, asking about their reference number, asking for status)
+B) Reporting a COMPLETELY DIFFERENT new maintenance problem (e.g. different room, different type of issue entirely)
+
+Consider: tenants often take time to respond. A delayed reply about the same topic is NOT a new issue. Only classify as B if the message clearly describes a different physical problem.
+
+Respond ONLY with JSON: {"intent": "existing" or "new", "reason": "brief explanation"}`;
+
+  try {
+    const result = await callLLM([{ role: 'user', content: prompt }], { maxTokens: 100 });
+    const cleaned = result.trim().replace(/```json\s*/g, '').replace(/```\s*/g, '');
+    const s = cleaned.indexOf('{'), e = cleaned.lastIndexOf('}');
+    if (s !== -1 && e !== -1) {
+      const parsed = JSON.parse(cleaned.substring(s, e + 1));
+      console.log(`[Intent] Classified as "${parsed.intent}": ${parsed.reason}`);
+      return parsed.intent === 'new' ? 'new' : 'existing';
+    }
+  } catch (err) {
+    console.error('[Intent] Classification failed:', err.message);
+  }
+  return 'existing'; // Default to continuing existing issue
 }
 
 async function processIncomingMessage(webhookData) {
@@ -142,8 +188,8 @@ async function processIncomingMessage(webhookData) {
 
     const lowerText = textContent.toLowerCase().trim();
 
-    // Check for "new issue" / "something else" / "yes" (after being asked)
-    const wantsNewIssue = lowerText.match(/\b(new issue|new problem|different issue|another problem|something else|yes please|yes i do|yeah|yep)\b/);
+    // Only match EXPLICIT new issue phrases (not casual affirmations)
+    const explicitNewIssue = lowerText.match(/\b(new issue|new problem|different issue|another problem|something else|report something new)\b/);
 
     // Check for "no" / "that's all" / "thanks" responses (closing the conversation)
     const wantsNothing = lowerText.match(/\b(no thanks|no thank|nope|that's all|thats all|all good|nothing else|no i'm good|no im good|no that's it|no thats it)\b/);
@@ -170,23 +216,76 @@ async function processIncomingMessage(webhookData) {
         await sendWhatsAppMessage(from, `No problem! Glad I could help. Just message me any time if something comes up. 👍`);
         return;
       }
-      if (wantsNewIssue || (!wantsNothing && textContent.length > 5)) {
-        // They want to report something new, fall through to create new issue
-        activeIssue = null;
+      // They want to report something new - fall through to create new issue
+      activeIssue = null;
+    }
+
+    // ============================================================
+    // 10-hour gap detection: if tenant hasn't messaged in 10+ hours
+    // on an active issue, ask whether this is the same issue or new
+    // ============================================================
+    if (activeIssue && !explicitNewIssue) {
+      const lastTenantMsg = db.prepare(
+        "SELECT created_at FROM messages WHERE issue_id = ? AND sender = 'tenant' ORDER BY created_at DESC LIMIT 1 OFFSET 0"
+      ).get(activeIssue.id);
+
+      // Check the last message from ANYONE on this issue (to detect the gap properly)
+      const lastAnyMsg = db.prepare(
+        "SELECT created_at FROM messages WHERE issue_id = ? ORDER BY created_at DESC LIMIT 1"
+      ).get(activeIssue.id);
+
+      if (lastAnyMsg) {
+        const gapMs = Date.now() - new Date(lastAnyMsg.created_at).getTime();
+        const isReturningAfterGap = gapMs > CONVERSATION_GAP_MS;
+
+        if (isReturningAfterGap) {
+          console.log(`[WhatsApp] Tenant returning after ${Math.round(gapMs / 3600000)}h gap on issue ${activeIssue.uuid}`);
+
+          // Use AI to classify: is this about the existing issue or something new?
+          const lastMessages = db.prepare(
+            "SELECT sender, content FROM messages WHERE issue_id = ? ORDER BY created_at DESC LIMIT 6"
+          ).all(activeIssue.id).reverse();
+
+          const intent = await classifyTenantIntent(textContent, activeIssue, lastMessages);
+
+          if (intent === 'new') {
+            // AI says this is a different issue — ask to confirm before creating
+            const confirmMsg = `Hey ${tenant.name?.split(' ')[0] || 'there'}! I can see you have an open issue:\n\n📋 *${activeIssue.title}* (Ref: ${activeIssue.uuid})\n\nIt sounds like you might be reporting something new. Is this a *new issue*, or are you following up on the one above?`;
+            await sendWhatsAppMessage(from, confirmMsg);
+            // Save their message and bot's question to the existing issue for now
+            db.prepare('INSERT INTO messages (issue_id, sender, content, message_type, whatsapp_message_id) VALUES (?, ?, ?, ?, ?)').run(
+              activeIssue.id, 'tenant', textContent, messageType === 'image' ? 'image' : 'text', whatsappMessageId
+            );
+            db.prepare('INSERT INTO messages (issue_id, sender, content, message_type) VALUES (?, ?, ?, ?)').run(
+              activeIssue.id, 'bot', confirmMsg, 'text'
+            );
+            return;
+          }
+          // intent === 'existing': continue with this issue (fall through)
+        }
       }
     }
 
-    // Force new issue if they explicitly ask
-    if (wantsNewIssue && activeIssue) {
+    // Force new issue ONLY if they explicitly ask with clear phrases
+    if (explicitNewIssue && activeIssue) {
       activeIssue = null;
     }
 
     // Create new issue if needed
     if (!activeIssue) {
-      // Don't create an issue just for "yes" without context
-      if (lowerText.match(/^(yes|yeah|yep|yes please)$/)) {
+      // Don't create an issue just for short affirmations without context
+      if (lowerText.match(/^(yes|yeah|yep|yes please|yea|ok|okay)$/)) {
         await sendWhatsAppMessage(from, `Sure thing! What's the issue? Describe what's going on and I'll help you get it sorted. 🔧`);
         return;
+      }
+
+      // For ambiguous short messages from tenants with prior history, ask for clarification
+      if (textContent.length < 15 && lastResolvedIssue && !explicitNewIssue) {
+        const recentIssueAge = Date.now() - new Date(lastResolvedIssue.updated_at).getTime();
+        if (recentIssueAge < 7 * 24 * 60 * 60 * 1000) { // within last 7 days
+          await sendWhatsAppMessage(from, `Hey ${tenant.name?.split(' ')[0] || 'there'}! Are you following up on your previous issue (${lastResolvedIssue.title}, Ref: ${lastResolvedIssue.uuid}), or do you need to report something new?`);
+          return;
+        }
       }
 
       const issueUuid = uuidv4().slice(0, 8).toUpperCase();
@@ -290,6 +389,11 @@ When suggesting a fix:
 If escalating instead, end with: "Is there anything else you need help with?"`;
     }
 
+    // Capture issue ID and tenant/property info for async email callback
+    const issueId = activeIssue.id;
+    const tenantForEmail = { ...tenant };
+    const propertyForEmail = property ? { ...property } : null;
+
     try {
       const aiResponse = await callLLM(llmMessages, { additionalContext });
       db.prepare('INSERT INTO messages (issue_id, sender, content, message_type) VALUES (?, ?, ?, ?)').run(activeIssue.id, 'bot', aiResponse, 'text');
@@ -313,25 +417,36 @@ If escalating instead, end with: "Is there anything else you need help with?"`;
 
       // Run silent backend analysis for the team
       if (diagnosisRound === 0 || (diagnosisRound > 0 && diagnosisRound % 2 === 0)) {
-        runBackendAnalysis(activeIssue.id, conversationMessages)
+        runBackendAnalysis(issueId, conversationMessages)
           .then(() => {
             // Send new issue email after first backend analysis completes
             if (diagnosisRound === 0) {
-              const freshIssue = db.prepare('SELECT * FROM issues WHERE id = ?').get(activeIssue.id);
-              const issueMessages = db.prepare('SELECT * FROM messages WHERE issue_id = ? ORDER BY created_at ASC').all(activeIssue.id);
-              const issueAttachments = db.prepare('SELECT * FROM attachments WHERE issue_id = ?').all(activeIssue.id);
-              sendNewIssueEmail({ issue: freshIssue || activeIssue, tenant, property, messages: issueMessages, attachments: issueAttachments })
-                .catch(e => console.error('[Email] New issue email failed:', e.message));
+              // Use a fresh DB connection since the outer one is closed by now
+              const emailDb = getDb();
+              try {
+                const freshIssue = emailDb.prepare('SELECT * FROM issues WHERE id = ?').get(issueId);
+                const issueMessages = emailDb.prepare('SELECT * FROM messages WHERE issue_id = ? ORDER BY created_at ASC').all(issueId);
+                const issueAttachments = emailDb.prepare('SELECT * FROM attachments WHERE issue_id = ?').all(issueId);
+                sendNewIssueEmail({ issue: freshIssue, tenant: tenantForEmail, property: propertyForEmail, messages: issueMessages, attachments: issueAttachments })
+                  .catch(e => console.error('[Email] New issue email failed:', e.message));
+              } finally {
+                emailDb.close();
+              }
             }
           })
           .catch(e => {
             console.error('[Backend] Analysis failed:', e.message);
             // Still send new issue email even if analysis fails
             if (diagnosisRound === 0) {
-              const issueMessages = db.prepare('SELECT * FROM messages WHERE issue_id = ? ORDER BY created_at ASC').all(activeIssue.id);
-              const issueAttachments = db.prepare('SELECT * FROM attachments WHERE issue_id = ?').all(activeIssue.id);
-              sendNewIssueEmail({ issue: activeIssue, tenant, property, messages: issueMessages, attachments: issueAttachments })
-                .catch(e2 => console.error('[Email] New issue email failed:', e2.message));
+              const emailDb = getDb();
+              try {
+                const issueMessages = emailDb.prepare('SELECT * FROM messages WHERE issue_id = ? ORDER BY created_at ASC').all(issueId);
+                const issueAttachments = emailDb.prepare('SELECT * FROM attachments WHERE issue_id = ?').all(issueId);
+                sendNewIssueEmail({ issue: activeIssue, tenant: tenantForEmail, property: propertyForEmail, messages: issueMessages, attachments: issueAttachments })
+                  .catch(e2 => console.error('[Email] New issue email failed:', e2.message));
+              } finally {
+                emailDb.close();
+              }
             }
           });
       }
@@ -487,13 +602,18 @@ const STATUS_MESSAGES = {
   in_progress: (name, title, uuid) => `Hi ${name}, just to let you know we're looking into your ${title} now. Ref: ${uuid}`,
   escalated: (name, title, uuid) => `Hi ${name}, we've escalated your ${title} to our maintenance team for priority attention. Ref: ${uuid}`,
   resolved: (name, title, uuid) => `Hi ${name}, your ${title} has been resolved. If there are any problems, just message me again. Ref: ${uuid}`,
+  closed: (name, title, uuid) => `Hi ${name}, your ${title} (Ref: ${uuid}) has been closed. If this issue comes back or you need anything else, just message me any time.`,
 };
 
 async function sendStatusUpdate(issueId, newStatus) {
   try {
     const db = getDb();
     const setting = db.prepare("SELECT value FROM settings WHERE key = 'auto_status_updates'").get();
-    if (setting?.value !== 'true') { db.close(); return; }
+    if (setting?.value !== 'true') {
+      console.log(`[Status Update] auto_status_updates is not enabled (value: ${setting?.value})`);
+      db.close();
+      return;
+    }
 
     const issue = db.prepare(`
       SELECT i.*, t.name as tenant_name, t.phone as tenant_phone
@@ -501,9 +621,15 @@ async function sendStatusUpdate(issueId, newStatus) {
     `).get(issueId);
     db.close();
 
-    if (!issue || !issue.tenant_phone) return;
+    if (!issue || !issue.tenant_phone) {
+      console.log(`[Status Update] No issue or tenant phone for issue ${issueId}`);
+      return;
+    }
     const msgFn = STATUS_MESSAGES[newStatus];
-    if (!msgFn) return;
+    if (!msgFn) {
+      console.log(`[Status Update] No message template for status "${newStatus}"`);
+      return;
+    }
 
     const firstName = issue.tenant_name?.split(' ')[0] || 'there';
     const msg = msgFn(firstName, issue.title || 'maintenance issue', issue.uuid);
