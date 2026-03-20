@@ -52,7 +52,8 @@ export default function IssueDetail() {
     if (!report) return;
     try {
     const { default: jsPDF } = await import('jspdf');
-    await import('jspdf-autotable');
+    const { applyPlugin } = await import('jspdf-autotable');
+    applyPlugin(jsPDF);
 
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
     const pageW = doc.internal.pageSize.getWidth();
