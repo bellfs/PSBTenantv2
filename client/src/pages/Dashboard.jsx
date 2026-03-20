@@ -205,7 +205,7 @@ export default function Dashboard() {
       </div>
 
       {/* Performance Metrics - side by side with Recent Issues */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+      <div className="dashboard-perf-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
         {/* Performance Metrics */}
         {sla && (
           <div className="card" style={{ marginBottom: 0 }}>
@@ -304,7 +304,7 @@ export default function Dashboard() {
           </div>
           <div className="card-body" style={{ padding: '10px 16px' }}>
             {stats.recent_issues?.length > 0 ? (
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              <div className="recent-issues-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                 {stats.recent_issues.map(issue => {
                   const sc = statusColors[issue.status] || statusColors.open;
                   return (
@@ -475,7 +475,7 @@ export default function Dashboard() {
               return (
                 <>
                   {/* Summary cards */}
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 16 }}>
+                  <div className="utility-summary-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 16 }}>
                     <div style={{
                       textAlign: 'center', padding: '14px 8px', borderRadius: 'var(--radius-md)',
                       background: 'rgba(251,191,36,0.06)', border: '1px solid rgba(251,191,36,0.1)'
@@ -586,6 +586,7 @@ export default function Dashboard() {
             </Link>
           </div>
           <div className="card-body" style={{ padding: '0 16px 12px' }}>
+            <div className="table-scroll-mobile">
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>
                 <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
@@ -648,6 +649,7 @@ export default function Dashboard() {
                 })}
               </tbody>
             </table>
+            </div>
           </div>
         </div>
       )}

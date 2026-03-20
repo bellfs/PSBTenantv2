@@ -117,6 +117,28 @@ export const api = {
   // Copilot
   askCopilot: (question, history) => request('/copilot/ask', { method: 'POST', body: JSON.stringify({ question, history }) }),
 
+  // Inspections (Check-In / Check-Out)
+  getInspections: (params = {}) => { const qs = new URLSearchParams(params).toString(); return request(`/inspections?${qs}`); },
+  getInspection: (id) => request(`/inspections/${id}`),
+  createInspection: (data) => request('/inspections', { method: 'POST', body: JSON.stringify(data) }),
+  updateInspection: (id, data) => request(`/inspections/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  updateInspectionItem: (itemId, data) => request(`/inspections/items/${itemId}`, { method: 'PUT', body: JSON.stringify(data) }),
+  addInspectionRoom: (id, room_name) => request(`/inspections/${id}/rooms`, { method: 'POST', body: JSON.stringify({ room_name }) }),
+  addRoomItem: (roomId, item_name) => request(`/inspections/rooms/${roomId}/items`, { method: 'POST', body: JSON.stringify({ item_name }) }),
+  uploadInspectionPhoto: (id, formData) => {
+    const token = localStorage.getItem('psb_token');
+    return fetch(`${API_BASE}/inspections/${id}/photos`, {
+      method: 'POST', body: formData,
+      headers: { ...(token ? { 'Authorization': `Bearer ${token}` } : {}) }
+    }).then(r => { if (!r.ok) throw new Error('Upload failed'); return r.json(); });
+  },
+  deleteInspectionPhoto: (photoId) => request(`/inspections/photos/${photoId}`, { method: 'DELETE' }),
+  signInspection: (id, signer, signature) => request(`/inspections/${id}/sign`, { method: 'POST', body: JSON.stringify({ signer, signature }) }),
+  addDeduction: (id, data) => request(`/inspections/${id}/deductions`, { method: 'POST', body: JSON.stringify(data) }),
+  deleteDeduction: (deductionId) => request(`/inspections/deductions/${deductionId}`, { method: 'DELETE' }),
+  getInspectionReport: (id) => request(`/inspections/${id}/report`),
+  getPropertyCheckins: (propertyId) => request(`/inspections/property/${propertyId}/checkins`),
+
   // Utilities
   getUtilityReadings: (params = {}) => { const qs = new URLSearchParams(params).toString(); return request(`/utilities/readings?${qs}`); },
   saveUtilityReading: (data) => request('/utilities/readings', { method: 'POST', body: JSON.stringify(data) }),

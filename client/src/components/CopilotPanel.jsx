@@ -2,16 +2,25 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Bot, X, Send, Loader2, MessageSquare, Sparkles } from 'lucide-react';
 import { api } from '../utils/api';
 
-export default function CopilotPanel() {
-  const [open, setOpen] = useState(false);
+export default function CopilotPanel({ externalOpen, onExternalClose }) {
+  const [internalOpen, setInternalOpen] = useState(false);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
 
+  // Merge internal toggle (desktop FAB) with external open (mobile search bar)
+  const open = internalOpen || externalOpen;
+  const closePanel = () => {
+    setInternalOpen(false);
+    if (onExternalClose) onExternalClose();
+  };
+
   useEffect(() => {
-    if (open && inputRef.current) inputRef.current.focus();
+    if (open && inputRef.current) {
+      setTimeout(() => inputRef.current?.focus(), 100);
+    }
   }, [open]);
 
   useEffect(() => {
@@ -54,9 +63,9 @@ export default function CopilotPanel() {
 
   return (
     <>
-      {/* Toggle button */}
-      <button className="copilot-toggle" onClick={() => setOpen(!open)} title="AI Copilot">
-        {open ? <X size={20} /> : <Bot size={20} />}
+      {/* Toggle button — desktop only (hidden on mobile via CSS) */}
+      <button className="copilot-toggle" onClick={() => setInternalOpen(!internalOpen)} title="AI Copilot">
+        {internalOpen ? <X size={20} /> : <Bot size={20} />}
       </button>
 
       {/* Panel */}
@@ -72,7 +81,7 @@ export default function CopilotPanel() {
                 <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Ask anything about your data</div>
               </div>
             </div>
-            <button className="copilot-close" onClick={() => setOpen(false)}>
+            <button className="copilot-close" onClick={closePanel}>
               <X size={16} />
             </button>
           </div>

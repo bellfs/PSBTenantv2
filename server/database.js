@@ -257,6 +257,98 @@ async function initialiseDatabase() {
   db.exec('CREATE INDEX IF NOT EXISTS idx_meter_readings_period ON meter_readings(year, month)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_utility_alerts_property ON utility_alerts(property_id)');
 
+  // ===== CHECK-IN / CHECK-OUT TABLES =====
+  db.exec(`CREATE TABLE IF NOT EXISTS inspections (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    type TEXT NOT NULL CHECK(type IN ('check_in', 'check_out')),
+    property_id INTEGER NOT NULL,
+    flat_number TEXT,
+    tenant_id INTEGER,
+    tenancy_id INTEGER,
+    performed_by TEXT NOT NULL,
+    status TEXT DEFAULT 'draft' CHECK(status IN ('draft', 'in_progress', 'pending_signature', 'completed')),
+    inspection_date DATE NOT NULL,
+    notes TEXT,
+    meter_gas TEXT,
+    meter_electric TEXT,
+    meter_water TEXT,
+    key_count INTEGER,
+    key_notes TEXT,
+    tenant_signature TEXT,
+    tenant_signed_at DATETIME,
+    staff_signature TEXT,
+    staff_signed_at DATETIME,
+    deposit_amount REAL,
+    total_deductions REAL DEFAULT 0,
+    deposit_return REAL,
+    linked_checkin_id INTEGER,
+    pdf_path TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (property_id) REFERENCES properties(id),
+    FOREIGN KEY (tenant_id) REFERENCES tenants(id),
+    FOREIGN KEY (tenancy_id) REFERENCES tenancies(id),
+    FOREIGN KEY (linked_checkin_id) REFERENCES inspections(id)
+  )`);
+
+  db.exec(`CREATE TABLE IF NOT EXISTS inspection_rooms (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    inspection_id INTEGER NOT NULL,
+    room_name TEXT NOT NULL,
+    room_order INTEGER DEFAULT 0,
+    notes TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (inspection_id) REFERENCES inspections(id) ON DELETE CASCADE
+  )`);
+
+  db.exec(`CREATE TABLE IF NOT EXISTS inspection_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    room_id INTEGER NOT NULL,
+    item_name TEXT NOT NULL,
+    condition TEXT DEFAULT 'good' CHECK(condition IN ('excellent', 'good', 'fair', 'poor', 'damaged')),
+    checkin_condition TEXT,
+    description TEXT,
+    is_damaged INTEGER DEFAULT 0,
+    repair_cost REAL DEFAULT 0,
+    repair_notes TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (room_id) REFERENCES inspection_rooms(id) ON DELETE CASCADE
+  )`);
+
+  db.exec(`CREATE TABLE IF NOT EXISTS inspection_photos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    inspection_id INTEGER NOT NULL,
+    room_id INTEGER,
+    item_id INTEGER,
+    file_path TEXT NOT NULL,
+    caption TEXT,
+    photo_type TEXT DEFAULT 'condition' CHECK(photo_type IN ('condition', 'meter', 'keys', 'general', 'damage')),
+    uploaded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (inspection_id) REFERENCES inspections(id) ON DELETE CASCADE,
+    FOREIGN KEY (room_id) REFERENCES inspection_rooms(id) ON DELETE CASCADE,
+    FOREIGN KEY (item_id) REFERENCES inspection_items(id) ON DELETE CASCADE
+  )`);
+
+  db.exec(`CREATE TABLE IF NOT EXISTS inspection_deductions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    inspection_id INTEGER NOT NULL,
+    item_id INTEGER,
+    description TEXT NOT NULL,
+    category TEXT DEFAULT 'damage',
+    cost REAL NOT NULL DEFAULT 0,
+    evidence_notes TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (inspection_id) REFERENCES inspections(id) ON DELETE CASCADE,
+    FOREIGN KEY (item_id) REFERENCES inspection_items(id) ON DELETE CASCADE
+  )`);
+
+  db.exec('CREATE INDEX IF NOT EXISTS idx_inspections_property ON inspections(property_id)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_inspections_tenant ON inspections(tenant_id)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_inspections_type ON inspections(type)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_inspection_rooms ON inspection_rooms(inspection_id)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_inspection_items ON inspection_items(room_id)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_inspection_photos ON inspection_photos(inspection_id)');
+
   // Migrate meter_readings unique constraint if table already exists without property_name in unique
   // (safe to run - just adds the column to the unique constraint concept via the CREATE TABLE IF NOT EXISTS above)
 

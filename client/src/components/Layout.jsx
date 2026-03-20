@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../App';
-import { LayoutDashboard, AlertCircle, Building2, Users, Settings, LogOut, Wrench, BarChart3, Menu, X, HardHat, ShieldCheck, ChevronRight, CalendarRange, Zap } from 'lucide-react';
+import { LayoutDashboard, AlertCircle, Building2, Users, Settings, LogOut, Wrench, BarChart3, Menu, X, HardHat, ShieldCheck, CalendarRange, Zap, Sparkles, ClipboardCheck, ClipboardList } from 'lucide-react';
 import CopilotPanel from './CopilotPanel';
 
 export default function Layout() {
@@ -9,6 +9,7 @@ export default function Layout() {
   const navigate = useNavigate();
   const location = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [copilotOpen, setCopilotOpen] = useState(false);
   const handleLogout = () => { logout(); navigate('/login'); };
   const initials = user?.name?.split(' ').map(n => n[0]).join('').toUpperCase() || 'U';
 
@@ -32,6 +33,8 @@ export default function Layout() {
       <NavLink to="/compliance" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}><ShieldCheck size={18} /> Compliance</NavLink>
       <NavLink to="/analytics" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}><BarChart3 size={18} /> Analytics</NavLink>
       <NavLink to="/utilities" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}><Zap size={18} /> Utilities</NavLink>
+      <NavLink to="/check-ins" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}><ClipboardCheck size={18} /> Check-In</NavLink>
+      <NavLink to="/check-outs" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}><ClipboardList size={18} /> Check-Out</NavLink>
       {user?.role === 'admin' && <NavLink to="/settings" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}><Settings size={18} /> Settings</NavLink>}
     </>
   );
@@ -108,6 +111,14 @@ export default function Layout() {
         <div className="sidebar-user-avatar" style={{ width: 28, height: 28, fontSize: 11 }}>{initials}</div>
       </div>
 
+      {/* Mobile copilot search bar — always visible under header */}
+      <div className="mobile-copilot-bar">
+        <button className="mobile-copilot-trigger" onClick={() => setCopilotOpen(true)}>
+          <Sparkles size={14} />
+          Ask AI anything...
+        </button>
+      </div>
+
       {/* Mobile slide-out nav */}
       {mobileOpen && <div className="mobile-overlay" onClick={() => setMobileOpen(false)} />}
       <aside className={`sidebar sidebar-mobile ${mobileOpen ? 'open' : ''}`}>
@@ -137,7 +148,7 @@ export default function Layout() {
       </aside>
 
       <main className="main-content"><Outlet /></main>
-      <CopilotPanel />
+      <CopilotPanel externalOpen={copilotOpen} onExternalClose={() => setCopilotOpen(false)} />
     </div>
   );
 }
