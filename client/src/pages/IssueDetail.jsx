@@ -47,33 +47,395 @@ export default function IssueDetail() {
     finally { setReportLoading(false); }
   };
 
-  const downloadReport = () => {
+  const downloadReport = async () => {
     if (!report) return;
-    const content = `PSB PROPERTIES - MAINTENANCE ISSUE REPORT
-========================================
-Generated: ${new Date(report.generated_at).toLocaleString('en-GB')}
-Reference: ${report.issue.uuid}
-Property: ${report.issue.property_name}
-Tenant: ${report.issue.tenant_name}${report.issue.tenant_flat ? ', ' + report.issue.tenant_flat : ''}
-Status: ${report.issue.status}
-Priority: ${report.issue.priority}
-Category: ${report.issue.category || 'Pending'}
-========================================
+    const { default: jsPDF } = await import('jspdf');
+    await import('jspdf-autotable');
 
-${report.report}
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 18;
+    const contentW = pageW - margin * 2;
+    let y = 0;
 
-========================================
-Photos: ${report.attachments.length} attached
-Messages in conversation: ${report.messages_count}
-AI Estimated Cost: £${(report.issue.estimated_cost || 0).toFixed(2)}
-AI Estimated Time: ${(report.issue.estimated_hours || 0).toFixed(1)} hours
-${report.issue.final_cost ? 'Actual Cost: £' + report.issue.final_cost.toFixed(2) : ''}
-${report.issue.attended_by ? 'Attended By: ' + report.issue.attended_by : ''}
-`;
-    const blob = new Blob([content], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = `issue-report-${report.issue.uuid}.txt`; a.click();
-    URL.revokeObjectURL(url);
+    const COLORS = {
+      navy: [26, 26, 46],
+      accent: [99, 102, 241],
+      accentLight: [139, 92, 246],
+      success: [52, 211, 153],
+      warning: [251, 191, 36],
+      danger: [248, 113, 113],
+      darkBg: [15, 15, 30],
+      lightBg: [248, 249, 250],
+      cardBg: [240, 242, 248],
+      text: [30, 30, 50],
+      muted: [120, 120, 140],
+      white: [255, 255, 255],
+    };
+
+    const STATUS_CFG = {
+      open: { color: COLORS.accent, emoji: '\u25CF', label: 'OPEN' },
+      in_progress: { color: COLORS.warning, emoji: '\u25B6', label: 'IN PROGRESS' },
+      escalated: { color: COLORS.danger, emoji: '\u26A0', label: 'ESCALATED' },
+      resolved: { color: COLORS.success, emoji: '\u2714', label: 'RESOLVED' },
+      closed: { color: COLORS.muted, emoji: '\u2716', label: 'CLOSED' },
+    };
+
+    const PRIORITY_CFG = {
+      urgent: { color: [220, 38, 38], label: 'URGENT' },
+      high: { color: [249, 115, 22], label: 'HIGH' },
+      medium: { color: [234, 179, 8], label: 'MEDIUM' },
+      low: { color: [34, 197, 94], label: 'LOW' },
+    };
+
+    const checkPageBreak = (needed) => {
+      if (y + needed > pageH - 20) {
+        // Footer on current page
+        doc.setFontSize(8);
+        doc.setTextColor(...COLORS.muted);
+        doc.text(`PSB Properties  \u2022  Maintenance Report  \u2022  ${report.issue.uuid}`, pageW / 2, pageH - 10, { align: 'center' });
+        doc.addPage();
+        y = 18;
+      }
+    };
+
+    const drawRoundedRect = (x, ry, w, h, r, fillColor) => {
+      doc.setFillColor(...fillColor);
+      doc.roundedRect(x, ry, w, h, r, r, 'F');
+    };
+
+    const drawBadge = (text, x, by, color) => {
+      const badgeW = doc.getTextWidth(text) + 8;
+      drawRoundedRect(x, by - 4, badgeW, 6.5, 1.5, color);
+      doc.setTextColor(...COLORS.white);
+      doc.setFontSize(7);
+      doc.setFont('helvetica', 'bold');
+      doc.text(text, x + 4, by);
+      return badgeW + 3;
+    };
+
+    // ========= HEADER BANNER =========
+    drawRoundedRect(0, 0, pageW, 52, 0, COLORS.navy);
+    // Accent stripe
+    doc.setFillColor(...COLORS.accent);
+    doc.rect(0, 48, pageW, 4, 'F');
+
+    // Logo area
+    doc.setFillColor(...COLORS.accent);
+    doc.roundedRect(margin, 12, 10, 10, 2, 2, 'F');
+    doc.setTextColor(...COLORS.white);
+    doc.setFontSize(14);
+    doc.setFont('helvetica', 'bold');
+    doc.text('\u2692', margin + 3.2, 19.5);
+
+    // Title
+    doc.setFontSize(18);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Maintenance Issue Report', margin + 14, 17.5);
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(200, 200, 220);
+    doc.text(`PSB Properties  \u2022  Ref: ${report.issue.uuid}  \u2022  Generated ${new Date(report.generated_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}`, margin + 14, 23.5);
+
+    // Status & Priority badges in header
+    const sc = STATUS_CFG[report.issue.status] || STATUS_CFG.open;
+    const pc = PRIORITY_CFG[report.issue.priority] || PRIORITY_CFG.medium;
+    doc.setFontSize(7);
+    let bx = margin + 14;
+    bx += drawBadge(`${sc.emoji}  ${sc.label}`, bx, 31, sc.color);
+    bx += drawBadge(pc.label, bx, 31, pc.color);
+    if (report.issue.category) {
+      bx += drawBadge((report.issue.category || '').toUpperCase().replace(/_/g, ' '), bx, 31, [80, 80, 110]);
+    }
+
+    y = 60;
+
+    // ========= ISSUE DETAILS TABLE =========
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...COLORS.text);
+    doc.text('\u{1F4CB}  Issue Details', margin, y);
+    y += 7;
+
+    const detailRows = [
+      ['Property', `${report.issue.property_name || 'Unknown'}${report.issue.property_address ? '  (' + report.issue.property_address + ')' : ''}`],
+      ['Tenant', `${report.issue.tenant_name || 'Unknown'}${report.issue.tenant_flat ? '  \u2022  ' + report.issue.tenant_flat : ''}`],
+      ['Reported', new Date(report.issue.created_at).toLocaleString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })],
+    ];
+    if (report.issue.escalated_at) detailRows.push(['Escalated', new Date(report.issue.escalated_at).toLocaleString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })]);
+    if (report.issue.resolved_at) detailRows.push(['Resolved', new Date(report.issue.resolved_at).toLocaleString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })]);
+    if (report.issue.attended_by) detailRows.push(['Attended By', report.issue.attended_by]);
+
+    doc.autoTable({
+      startY: y,
+      head: [],
+      body: detailRows,
+      theme: 'plain',
+      margin: { left: margin, right: margin },
+      columnStyles: {
+        0: { cellWidth: 35, fontStyle: 'bold', textColor: COLORS.muted, fontSize: 9 },
+        1: { textColor: COLORS.text, fontSize: 9 },
+      },
+      styles: { cellPadding: { top: 2.5, bottom: 2.5, left: 4, right: 4 }, overflow: 'linebreak' },
+      alternateRowStyles: { fillColor: [245, 246, 250] },
+      didDrawPage: () => {},
+    });
+
+    y = doc.lastAutoTable.finalY + 8;
+
+    // ========= COST ASSESSMENT BOX =========
+    checkPageBreak(30);
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...COLORS.text);
+    doc.text('\u{1F4B7}  Cost Assessment', margin, y);
+    y += 5;
+
+    drawRoundedRect(margin, y, contentW, 22, 3, COLORS.cardBg);
+
+    const estCost = (report.issue.estimated_cost || 0).toFixed(2);
+    const actCost = report.issue.final_cost ? report.issue.final_cost.toFixed(2) : null;
+    const estHours = (report.issue.estimated_hours || 0).toFixed(1);
+
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(...COLORS.muted);
+
+    const colW = contentW / (actCost ? 3 : 2);
+    doc.text('AI Estimated Cost', margin + colW * 0 + 6, y + 7);
+    doc.setFontSize(14);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...COLORS.accent);
+    doc.text(`\u00A3${estCost}`, margin + colW * 0 + 6, y + 14);
+
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(...COLORS.muted);
+    doc.text('Estimated Hours', margin + colW * 1 + 6, y + 7);
+    doc.setFontSize(14);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...COLORS.accent);
+    doc.text(`${estHours}h`, margin + colW * 1 + 6, y + 14);
+
+    if (actCost) {
+      doc.setFontSize(8);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(...COLORS.muted);
+      doc.text('Actual Cost', margin + colW * 2 + 6, y + 7);
+      doc.setFontSize(14);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(...COLORS.success);
+      doc.text(`\u00A3${actCost}`, margin + colW * 2 + 6, y + 14);
+    }
+
+    y += 28;
+
+    // ========= AI REPORT SECTIONS =========
+    checkPageBreak(20);
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...COLORS.text);
+    doc.text('\u{1F916}  AI Analysis Report', margin, y);
+    y += 7;
+
+    // Parse report into sections
+    const reportText = report.report || '';
+    const sectionHeaders = ['SUMMARY', 'DIAGNOSIS', 'ACTIONS TAKEN', 'RECOMMENDATIONS', 'COST ASSESSMENT'];
+    const sectionEmojis = { 'SUMMARY': '\u{1F4DD}', 'DIAGNOSIS': '\u{1F50D}', 'ACTIONS TAKEN': '\u2705', 'RECOMMENDATIONS': '\u{1F4A1}', 'COST ASSESSMENT': '\u{1F4B0}' };
+    const sectionColors = { 'SUMMARY': COLORS.accent, 'DIAGNOSIS': [168, 85, 247], 'ACTIONS TAKEN': COLORS.success, 'RECOMMENDATIONS': COLORS.warning, 'COST ASSESSMENT': [34, 211, 238] };
+
+    // Split report text into sections
+    let sections = [];
+    let remaining = reportText;
+    for (let i = 0; i < sectionHeaders.length; i++) {
+      const hdr = sectionHeaders[i];
+      const patterns = [
+        new RegExp(`\\d+\\)\\s*${hdr}[:\\s-]*`, 'i'),
+        new RegExp(`${hdr}[:\\s-]*`, 'i'),
+      ];
+      let idx = -1;
+      let matchLen = 0;
+      for (const p of patterns) {
+        const m = remaining.match(p);
+        if (m) { idx = m.index; matchLen = m[0].length; break; }
+      }
+      if (idx !== -1) {
+        // Find the end (next section or end of text)
+        let endIdx = remaining.length;
+        for (let j = i + 1; j < sectionHeaders.length; j++) {
+          const nextPatterns = [
+            new RegExp(`\\d+\\)\\s*${sectionHeaders[j]}[:\\s-]*`, 'i'),
+            new RegExp(`${sectionHeaders[j]}[:\\s-]*`, 'i'),
+          ];
+          for (const np of nextPatterns) {
+            const nm = remaining.match(np);
+            if (nm && nm.index > idx) { endIdx = Math.min(endIdx, nm.index); break; }
+          }
+        }
+        const body = remaining.substring(idx + matchLen, endIdx).trim();
+        if (body) sections.push({ title: hdr, body });
+      }
+    }
+
+    // If no sections parsed, just use the full text
+    if (sections.length === 0) {
+      sections = [{ title: 'REPORT', body: reportText }];
+    }
+
+    for (const section of sections) {
+      const lines = doc.splitTextToSize(section.body, contentW - 16);
+      const blockH = lines.length * 4.5 + 14;
+      checkPageBreak(blockH + 4);
+
+      const sColor = sectionColors[section.title] || COLORS.accent;
+      const sEmoji = sectionEmojis[section.title] || '\u25AA';
+
+      // Section card background
+      drawRoundedRect(margin, y, contentW, blockH, 3, [245, 246, 252]);
+      // Left accent bar
+      doc.setFillColor(...sColor);
+      doc.roundedRect(margin, y, 2.5, blockH, 1, 1, 'F');
+
+      // Section header
+      doc.setFontSize(9);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(...sColor);
+      doc.text(`${sEmoji}  ${section.title}`, margin + 8, y + 7);
+
+      // Section body
+      doc.setFontSize(8.5);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(...COLORS.text);
+      doc.text(lines, margin + 8, y + 13);
+
+      y += blockH + 4;
+    }
+
+    // ========= CONVERSATION LOG =========
+    if (data?.messages?.length > 0) {
+      checkPageBreak(20);
+      doc.setFontSize(11);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(...COLORS.text);
+      doc.text(`\u{1F4AC}  Conversation Log (${data.messages.length} messages)`, margin, y);
+      y += 7;
+
+      const msgRows = data.messages.map(m => {
+        const who = m.sender === 'tenant' ? `\u{1F464} ${report.issue.tenant_name}` : m.sender === 'bot' ? '\u{1F916} AI Assistant' : `\u{1F477} ${m.sender}`;
+        const time = new Date(m.created_at).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+        return [who, (m.content || '[media]').slice(0, 200), time];
+      });
+
+      const senderColors = {
+        tenant: [232, 245, 233],
+        bot: [227, 242, 253],
+        staff: [255, 243, 224],
+        system: [245, 245, 245],
+      };
+
+      doc.autoTable({
+        startY: y,
+        head: [['From', 'Message', 'Time']],
+        body: msgRows,
+        margin: { left: margin, right: margin },
+        headStyles: { fillColor: COLORS.navy, textColor: COLORS.white, fontSize: 8, fontStyle: 'bold', cellPadding: 3 },
+        bodyStyles: { fontSize: 7.5, textColor: COLORS.text, cellPadding: 2.5, overflow: 'linebreak' },
+        columnStyles: {
+          0: { cellWidth: 30, fontStyle: 'bold' },
+          1: { cellWidth: contentW - 55 },
+          2: { cellWidth: 25, textColor: COLORS.muted, fontSize: 7 },
+        },
+        alternateRowStyles: { fillColor: [248, 249, 255] },
+        styles: { lineColor: [230, 230, 240], lineWidth: 0.2 },
+        didParseCell: (hookData) => {
+          if (hookData.section === 'body' && hookData.column.index === 0) {
+            const text = hookData.cell.raw || '';
+            if (text.includes('\u{1F464}')) hookData.cell.styles.fillColor = senderColors.tenant;
+            else if (text.includes('\u{1F916}')) hookData.cell.styles.fillColor = senderColors.bot;
+            else if (text.includes('\u{1F477}')) hookData.cell.styles.fillColor = senderColors.staff;
+          }
+        },
+      });
+
+      y = doc.lastAutoTable.finalY + 8;
+    }
+
+    // ========= ATTACHED PHOTOS =========
+    if (report.attachments?.length > 0) {
+      checkPageBreak(20);
+      doc.setFontSize(11);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(...COLORS.text);
+      doc.text(`\u{1F4F7}  Attached Photos (${report.attachments.length})`, margin, y);
+      y += 7;
+
+      for (const att of report.attachments) {
+        try {
+          const imgUrl = `${window.location.origin}${att.file_path}`;
+          const response = await fetch(imgUrl);
+          if (!response.ok) continue;
+          const blob = await response.blob();
+          const dataUrl = await new Promise(resolve => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result);
+            reader.readAsDataURL(blob);
+          });
+
+          checkPageBreak(75);
+
+          // Photo frame
+          drawRoundedRect(margin, y, contentW, 68, 3, COLORS.cardBg);
+
+          try {
+            doc.addImage(dataUrl, 'JPEG', margin + 3, y + 3, 55, 55);
+          } catch (imgErr) {
+            doc.setFontSize(9);
+            doc.setTextColor(...COLORS.muted);
+            doc.text('[Image could not be embedded]', margin + 6, y + 30);
+          }
+
+          // AI analysis beside the photo
+          if (att.ai_analysis) {
+            let analysis = att.ai_analysis;
+            try {
+              const parsed = JSON.parse(analysis.replace(/```json\n?/g, '').replace(/```\n?/g, ''));
+              analysis = `Issue: ${parsed.likely_issue || 'Unknown'}\nSeverity: ${parsed.severity || 'Unknown'}\nCategory: ${parsed.category || 'Unknown'}${parsed.safety_concern ? '\n\u26A0 Safety Concern Identified' : ''}`;
+            } catch (e) {
+              analysis = (typeof analysis === 'string' ? analysis : '').slice(0, 200);
+            }
+            doc.setFontSize(8);
+            doc.setFont('helvetica', 'bold');
+            doc.setTextColor(...COLORS.accent);
+            doc.text('\u{1F916} AI Photo Analysis', margin + 62, y + 8);
+            doc.setFont('helvetica', 'normal');
+            doc.setTextColor(...COLORS.text);
+            const analysisLines = doc.splitTextToSize(analysis, contentW - 68);
+            doc.text(analysisLines, margin + 62, y + 14);
+          }
+
+          y += 72;
+        } catch (err) {
+          console.error('[PDF] Failed to embed image:', err);
+        }
+      }
+    }
+
+    // ========= FOOTER ON LAST PAGE =========
+    doc.setFontSize(7);
+    doc.setTextColor(...COLORS.muted);
+    doc.text(`PSB Properties  \u2022  Maintenance Report  \u2022  ${report.issue.uuid}  \u2022  Page ${doc.internal.getCurrentPageInfo().pageNumber}`, pageW / 2, pageH - 10, { align: 'center' });
+
+    // Add page numbers to all pages
+    const totalPages = doc.internal.getNumberOfPages();
+    for (let i = 1; i <= totalPages; i++) {
+      doc.setPage(i);
+      doc.setFontSize(7);
+      doc.setTextColor(...COLORS.muted);
+      doc.text(`Page ${i} of ${totalPages}`, pageW - margin, pageH - 10, { align: 'right' });
+    }
+
+    doc.save(`PSB-Report-${report.issue.uuid}.pdf`);
   };
 
   const addNote = async () => {
@@ -216,7 +578,7 @@ ${report.issue.attended_by ? 'Attended By: ' + report.issue.attended_by : ''}
                   <div>
                     <div style={{whiteSpace:'pre-wrap',fontSize:13,lineHeight:1.6,color:'var(--text-primary)',marginBottom:16}}>{report.report}</div>
                     <div style={{borderTop:'1px solid var(--border-light)',paddingTop:12,display:'flex',gap:8}}>
-                      <button className="btn btn-primary btn-sm" onClick={downloadReport}><FileText size={14}/> Download Report</button>
+                      <button className="btn btn-primary btn-sm" onClick={downloadReport}><FileText size={14}/> Download PDF Report</button>
                       <button className="btn btn-ghost btn-sm" onClick={generateReport} disabled={reportLoading}>{reportLoading ? 'Regenerating...' : 'Regenerate'}</button>
                     </div>
                   </div>
