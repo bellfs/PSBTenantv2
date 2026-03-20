@@ -13,8 +13,9 @@ const ELEC_COLOR = '#6366f1';
 const DANGER_COLOR = '#ef4444';
 
 const OLD_ELVET_APARTMENTS = [
-  'The Villiers', 'The Barrington', 'The Pemberton', 'The Kingsley',
-  'The Cromwell', 'The Neville', 'The Durham', 'The Elvet'
+  'Landlord Supply', 'The Villiers', 'The Barrington', 'The Egerton', 'The Wolsey',
+  'The Tunstall', 'The Montague', 'The Morton', 'The Gray',
+  'The Langley', 'The Kirkham', 'The Fordham', 'The Talbot Penthouse'
 ];
 
 const tooltipStyle = { background: '#16161f', border: '1px solid #2a2a3a', borderRadius: 8, color: '#f0f0f5' };
@@ -71,8 +72,9 @@ export default function Utilities() {
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
 
   // Rates tab state
-  const [allRates, setAllRates] = useState({ rates: [], current: {} });
-  const [rateForm, setRateForm] = useState({ rate_type: 'gas_unit_rate', rate_value: '', effective_from: new Date().toISOString().split('T')[0], notes: '' });
+  const [allRates, setAllRates] = useState({ rates: [], current: {}, byProperty: {} });
+  const [rateForm, setRateForm] = useState({ rate_type: 'gas_unit_rate', rate_value: '', effective_from: new Date().toISOString().split('T')[0], notes: '', property_id: '', property_name: '' });
+  const [rateViewProperty, setRateViewProperty] = useState('');  // '' = global, 'propId:propName' = specific
   const [fairUsageLimits, setFairUsageLimits] = useState([]);
   const [rateSaving, setRateSaving] = useState(false);
 
@@ -646,7 +648,111 @@ export default function Utilities() {
                 </div>
               )}
 
-              {/* Property Leaderboard */}
+              {/* Summary stat cards */}
+              <div className="stats-grid" style={{ marginBottom: 16 }}>
+                <div className="stat-card" style={{ borderLeft: `3px solid ${GAS_COLOR}` }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <div>
+                      <div className="stat-card-label">Total Gas Spend</div>
+                      <div className="stat-card-value" style={{ color: GAS_COLOR }}>&pound;{totals.gas_cost.toFixed(0)}</div>
+                      <div className="stat-card-sub">{totals.gas_usage.toFixed(0)} kWh</div>
+                    </div>
+                    <div style={{ width: 40, height: 40, borderRadius: 10, background: 'rgba(245,158,11,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <Flame size={20} style={{ color: GAS_COLOR }} />
+                    </div>
+                  </div>
+                </div>
+                <div className="stat-card" style={{ borderLeft: `3px solid ${ELEC_COLOR}` }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <div>
+                      <div className="stat-card-label">Total Electric Spend</div>
+                      <div className="stat-card-value" style={{ color: ELEC_COLOR }}>&pound;{totals.electric_cost.toFixed(0)}</div>
+                      <div className="stat-card-sub">{totals.electric_usage.toFixed(0)} kWh</div>
+                    </div>
+                    <div style={{ width: 40, height: 40, borderRadius: 10, background: 'rgba(99,102,241,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <Zap size={20} style={{ color: ELEC_COLOR }} />
+                    </div>
+                  </div>
+                </div>
+                <div className="stat-card accent">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <div>
+                      <div className="stat-card-label">Total Combined</div>
+                      <div className="stat-card-value">&pound;{totals.total_cost.toFixed(0)}</div>
+                      <div className="stat-card-sub">{leaderboard.length} properties tracked</div>
+                    </div>
+                    <div style={{ width: 40, height: 40, borderRadius: 10, background: 'rgba(99,102,241,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <PoundSterling size={20} style={{ color: 'var(--accent-light)' }} />
+                    </div>
+                  </div>
+                </div>
+                <div className="stat-card" style={{ borderLeft: '3px solid #22d3ee' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <div>
+                      <div className="stat-card-label">Highest Spender</div>
+                      <div className="stat-card-value" style={{ color: '#22d3ee', fontSize: 16 }}>
+                        {leaderboard.length > 0 ? leaderboard[0].display_name : 'N/A'}
+                      </div>
+                      <div className="stat-card-sub">{leaderboard.length > 0 ? `£${(leaderboard[0].total_cost || 0).toFixed(0)}` : ''}</div>
+                    </div>
+                    <div style={{ width: 40, height: 40, borderRadius: 10, background: 'rgba(34,211,238,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <TrendingUp size={20} style={{ color: '#22d3ee' }} />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Property Spend Comparison - Bar Chart */}
+              {leaderboard.length > 0 && (
+                <div className="card" style={{ marginBottom: 16 }}>
+                  <div className="card-header">
+                    <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <PoundSterling size={16} style={{ color: 'var(--accent-light)' }} />
+                      Property Spend Comparison - {dashYear}
+                    </h3>
+                  </div>
+                  <div className="card-body" style={{ height: Math.max(350, leaderboard.length * 32 + 60) }}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={(analytics?.propertyTotals || []).map(r => ({ name: r.display_name || 'Unknown', gas: Number((r.total_gas_cost || 0).toFixed(2)), electric: Number((r.total_electric_cost || 0).toFixed(2)), total: Number((r.total_cost || 0).toFixed(2)) }))} layout="vertical" margin={{ left: 10, right: 30 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#2a2a3a" />
+                        <XAxis type="number" tick={tickStyle} tickFormatter={v => `£${v}`} />
+                        <YAxis dataKey="name" type="category" tick={tickStyle} width={140} />
+                        <Tooltip contentStyle={tooltipStyle} formatter={(v, name) => [`£${Number(v).toFixed(2)}`, name === 'gas' ? 'Gas' : 'Electric']} />
+                        <Legend />
+                        <Bar dataKey="gas" fill={GAS_COLOR} radius={[0, 4, 4, 0]} stackId="a" name="Gas" />
+                        <Bar dataKey="electric" fill={ELEC_COLOR} radius={[0, 4, 4, 0]} stackId="a" name="Electric" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              )}
+
+              {/* Property Usage Comparison - Bar Chart */}
+              {leaderboard.length > 0 && (
+                <div className="card" style={{ marginBottom: 16 }}>
+                  <div className="card-header">
+                    <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <Zap size={16} style={{ color: 'var(--accent-light)' }} />
+                      Property Usage Comparison (kWh) - {dashYear}
+                    </h3>
+                  </div>
+                  <div className="card-body" style={{ height: Math.max(350, leaderboard.length * 32 + 60) }}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={leaderboard.map(r => ({ name: r.display_name || 'Unknown', gas: Number((r.gas_kwh || 0).toFixed(0)), electric: Number((r.electric_kwh || 0).toFixed(0)), total: Number((r.total_kwh || 0).toFixed(0)) }))} layout="vertical" margin={{ left: 10, right: 30 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#2a2a3a" />
+                        <XAxis type="number" tick={tickStyle} tickFormatter={v => `${v} kWh`} />
+                        <YAxis dataKey="name" type="category" tick={tickStyle} width={140} />
+                        <Tooltip contentStyle={tooltipStyle} formatter={(v, name) => [`${Number(v).toLocaleString()} kWh`, name === 'gas' ? 'Gas' : 'Electric']} />
+                        <Legend />
+                        <Bar dataKey="gas" fill={GAS_COLOR} radius={[0, 4, 4, 0]} stackId="a" name="Gas" />
+                        <Bar dataKey="electric" fill={ELEC_COLOR} radius={[0, 4, 4, 0]} stackId="a" name="Electric" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              )}
+
+              {/* Property Leaderboard Table */}
               <div className="card">
                 <div className="card-header">
                   <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -661,7 +767,6 @@ export default function Utilities() {
                       <tbody>
                         {leaderboard.map((row, idx) => {
                           const pct = maxLeaderboardKwh > 0 ? ((row.total_kwh || 0) / maxLeaderboardKwh) * 100 : 0;
-                          // Check fair usage
                           const gasLimit = fairUsage.find(f => f.property_id === row.property_id && f.meter_type === 'gas');
                           const elecLimit = fairUsage.find(f => f.property_id === row.property_id && f.meter_type === 'electric');
                           const monthCount = analytics?.monthlyTrends?.length > 0 ? new Set(analytics.monthlyTrends.map(r => r.month)).size : 12;
@@ -916,8 +1021,52 @@ export default function Utilities() {
       )}
 
       {/* ===== TAB 4: RATES & SETTINGS ===== */}
-      {tab === 'rates' && (
+      {tab === 'rates' && (() => {
+        // Build property options for the rate view selector (includes 52 OE apartments)
+        const ratePropertyOptions = [];
+        properties.forEach(p => {
+          const isOE = p.name?.toLowerCase().includes('52 old elvet');
+          if (isOE) {
+            OLD_ELVET_APARTMENTS.forEach(apt => ratePropertyOptions.push({ id: p.id, name: apt, label: apt }));
+          } else {
+            ratePropertyOptions.push({ id: p.id, name: '', label: p.name });
+          }
+        });
+
+        // Get effective rates for the selected view
+        const getEffectiveRate = (rateType) => {
+          if (!rateViewProperty) return allRates.current?.[rateType];
+          const override = allRates.byProperty?.[rateViewProperty]?.[rateType];
+          if (override != null) return override;
+          return allRates.current?.[rateType]; // fallback to global
+        };
+        const isOverride = (rateType) => {
+          if (!rateViewProperty) return false;
+          return allRates.byProperty?.[rateViewProperty]?.[rateType] != null;
+        };
+
+        return (
         <div>
+          {/* Property selector for viewing rates */}
+          <div className="card" style={{ marginBottom: 16 }}>
+            <div className="card-body" style={{ padding: '12px 16px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>Viewing rates for:</label>
+                <select className="form-input" style={{ maxWidth: 300 }} value={rateViewProperty} onChange={e => setRateViewProperty(e.target.value)}>
+                  <option value="">All Properties (Global Defaults)</option>
+                  {ratePropertyOptions.map(p => (
+                    <option key={`${p.id}:${p.name}`} value={`${p.id}:${p.name}`}>{p.label}</option>
+                  ))}
+                </select>
+                {rateViewProperty && (
+                  <span style={{ fontSize: 11, color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                    Properties without custom rates use the global defaults
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+
           {/* Current rates display */}
           <div className="stats-grid" style={{ marginBottom: 16 }}>
             {[
@@ -926,22 +1075,31 @@ export default function Utilities() {
               { key: 'gas_standing_charge', label: 'Gas Standing Charge', unit: 'p/day', color: GAS_COLOR, icon: <Flame size={18} /> },
               { key: 'electric_standing_charge', label: 'Elec Standing Charge', unit: 'p/day', color: ELEC_COLOR, icon: <Zap size={18} /> },
               { key: 'vat_rate', label: 'VAT Rate', unit: '%', color: '#a855f7', icon: <PoundSterling size={18} /> }
-            ].map(rate => (
-              <div key={rate.key} className="stat-card" style={{ borderLeft: `3px solid ${rate.color}` }}>
+            ].map(rate => {
+              const val = getEffectiveRate(rate.key);
+              const overridden = isOverride(rate.key);
+              return (
+              <div key={rate.key} className="stat-card" style={{ borderLeft: `3px solid ${rate.color}`, position: 'relative' }}>
+                {overridden && (
+                  <div style={{ position: 'absolute', top: 8, right: 10, fontSize: 9, background: 'var(--accent-light)', color: '#fff', padding: '1px 6px', borderRadius: 8, fontWeight: 600 }}>
+                    CUSTOM
+                  </div>
+                )}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                   <div>
                     <div className="stat-card-label">{rate.label}</div>
                     <div className="stat-card-value" style={{ color: rate.color }}>
-                      {allRates.current[rate.key] != null ? `${allRates.current[rate.key]}${rate.unit === '%' ? '%' : ''}` : 'Not set'}
+                      {val != null ? `${val}${rate.unit === '%' ? '%' : ''}` : 'Not set'}
                     </div>
-                    <div className="stat-card-sub">{rate.unit}</div>
+                    <div className="stat-card-sub">{rate.unit}{!overridden && rateViewProperty ? ' (global)' : ''}</div>
                   </div>
                   <div style={{ width: 40, height: 40, borderRadius: 10, background: `${rate.color}18`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: rate.color }}>
                     {rate.icon}
                   </div>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
 
           {/* Update rates form */}
@@ -949,6 +1107,22 @@ export default function Utilities() {
             <div className="card-header"><h3>Update Rate</h3></div>
             <div className="card-body">
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+                <div className="form-group">
+                  <label className="form-label">Apply To</label>
+                  <select className="form-input" value={rateForm.property_id ? `${rateForm.property_id}:${rateForm.property_name}` : ''} onChange={e => {
+                    if (!e.target.value) {
+                      setRateForm(f => ({ ...f, property_id: '', property_name: '' }));
+                    } else {
+                      const [pid, ...pname] = e.target.value.split(':');
+                      setRateForm(f => ({ ...f, property_id: parseInt(pid), property_name: pname.join(':') }));
+                    }
+                  }}>
+                    <option value="">All Properties (Global Default)</option>
+                    {ratePropertyOptions.map(p => (
+                      <option key={`f-${p.id}:${p.name}`} value={`${p.id}:${p.name}`}>{p.label}</option>
+                    ))}
+                  </select>
+                </div>
                 <div className="form-group">
                   <label className="form-label">Rate Type</label>
                   <select className="form-input" value={rateForm.rate_type} onChange={e => setRateForm(f => ({ ...f, rate_type: e.target.value }))}>
@@ -972,9 +1146,16 @@ export default function Utilities() {
                   <input className="form-input" value={rateForm.notes} onChange={e => setRateForm(f => ({ ...f, notes: e.target.value }))} placeholder="e.g. New tariff from supplier" />
                 </div>
               </div>
-              <button className="btn btn-primary" style={{ marginTop: 12, gap: 6 }} onClick={saveRate} disabled={rateSaving}>
-                <Save size={15} /> {rateSaving ? 'Saving...' : 'Save Rate'}
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 12 }}>
+                <button className="btn btn-primary" style={{ gap: 6 }} onClick={saveRate} disabled={rateSaving}>
+                  <Save size={15} /> {rateSaving ? 'Saving...' : 'Save Rate'}
+                </button>
+                {rateForm.property_id && (
+                  <span style={{ fontSize: 12, color: 'var(--accent-light)', fontWeight: 500 }}>
+                    Setting custom rate for {ratePropertyOptions.find(p => p.id === rateForm.property_id && p.name === rateForm.property_name)?.label || 'selected property'}
+                  </span>
+                )}
+              </div>
             </div>
           </div>
 
@@ -984,10 +1165,19 @@ export default function Utilities() {
               <div className="card-header"><h3>Rate History</h3></div>
               <div className="table-container">
                 <table>
-                  <thead><tr><th>Rate Type</th><th>Value</th><th>Effective From</th><th>Effective To</th><th>Notes</th></tr></thead>
+                  <thead><tr><th>Property</th><th>Rate Type</th><th>Value</th><th>Effective From</th><th>Effective To</th><th>Notes</th></tr></thead>
                   <tbody>
                     {allRates.rates.map((r, i) => (
                       <tr key={i}>
+                        <td>
+                          {r.property_id ? (
+                            <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--accent-light)' }}>
+                              {r.property_name || r.parent_property_name || `Property #${r.property_id}`}
+                            </span>
+                          ) : (
+                            <span style={{ fontSize: 12, color: 'var(--text-muted)', fontStyle: 'italic' }}>Global Default</span>
+                          )}
+                        </td>
                         <td style={{ fontWeight: 500, textTransform: 'capitalize' }}>{(r.rate_type || '').replace(/_/g, ' ')}</td>
                         <td style={{ fontWeight: 600 }}>{r.rate_value}</td>
                         <td style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{r.effective_from}</td>
@@ -1050,7 +1240,8 @@ export default function Utilities() {
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
     </div>
   );
 }

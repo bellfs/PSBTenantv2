@@ -221,8 +221,11 @@ async function initialiseDatabase() {
     rate_value REAL NOT NULL,
     effective_from DATE NOT NULL,
     effective_to DATE,
+    property_id INTEGER,
+    property_name TEXT,
     notes TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (property_id) REFERENCES properties(id)
   )`);
 
   db.exec(`CREATE TABLE IF NOT EXISTS utility_alerts (
@@ -274,6 +277,8 @@ async function initialiseDatabase() {
     ['tenants','active','ALTER TABLE tenants ADD COLUMN active INTEGER DEFAULT 1'],
     ['issues','ai_report','ALTER TABLE issues ADD COLUMN ai_report TEXT'],
     ['issues','ai_report_generated_at','ALTER TABLE issues ADD COLUMN ai_report_generated_at DATETIME'],
+    ['utility_rates','property_id','ALTER TABLE utility_rates ADD COLUMN property_id INTEGER'],
+    ['utility_rates','property_name','ALTER TABLE utility_rates ADD COLUMN property_name TEXT'],
   ];
   for (const [t,c,s] of cols) {
     try { db.prepare(`SELECT ${c} FROM ${t} LIMIT 0`).all(); } catch(e) {
@@ -615,23 +620,28 @@ function seedMeterReadings(db) {
   if (!oeRow) { console.log('  [Seed] 52 Old Elvet not found, skipping meter readings'); return; }
   const oeId = oeRow.id;
 
-  // Ensure FFR properties exist
-  for (const [name, addr] of [
-    ['Flat 1 Church Hill', 'Flat 1 Church Hill, Durham'],
-    ['Flat 2 Church Hill', 'Flat 2 Church Hill, Durham'],
-    ['Flat 3 Church Hill', 'Flat 3 Church Hill, Durham'],
-    ['Flat 4 Church Hill', 'Flat 4 Church Hill, Durham'],
-    ['41 Old Elvet', '41 Old Elvet, Durham'],
-  ]) {
-    if (!db.prepare('SELECT id FROM properties WHERE name = ?').get(name)) {
-      db.prepare('INSERT INTO properties (name, address, postcode, num_units) VALUES (?, ?, ?, ?)').run(name, addr, 'DH1', 1);
+  // Ensure 41 Old Elvet property exists
+  if (!db.prepare("SELECT id FROM properties WHERE name = '41 Old Elvet'").get()) {
+    db.prepare('INSERT INTO properties (name, address, postcode, num_units) VALUES (?, ?, ?, ?)').run('41 Old Elvet', '41 Old Elvet, Durham', 'DH1', 1);
+  }
+
+  // Remove Church Hill properties (not ours)
+  for (const chName of ['Flat 1 Church Hill','Flat 2 Church Hill','Flat 3 Church Hill','Flat 4 Church Hill']) {
+    const chProp = db.prepare('SELECT id FROM properties WHERE name = ?').get(chName);
+    if (chProp) {
+      db.prepare('DELETE FROM meter_readings WHERE property_id = ?').run(chProp.id);
+      try { db.prepare('DELETE FROM utility_alerts WHERE property_id = ?').run(chProp.id); } catch(e) {}
+      try { db.prepare('DELETE FROM fair_usage_limits WHERE property_id = ?').run(chProp.id); } catch(e) {}
+      try { db.prepare('DELETE FROM compliance_certificates WHERE property_id = ?').run(chProp.id); } catch(e) {}
+      try { db.prepare('DELETE FROM documents WHERE property_id = ?').run(chProp.id); } catch(e) {}
+      try { db.prepare('DELETE FROM property_budgets WHERE property_id = ?').run(chProp.id); } catch(e) {}
+      db.prepare('DELETE FROM properties WHERE id = ?').run(chProp.id);
+      console.log(`  Removed Church Hill property: ${chName}`);
     }
   }
 
   const ffrIds = {};
-  for (const name of ['Flat 1 Church Hill','Flat 2 Church Hill','Flat 3 Church Hill','Flat 4 Church Hill','41 Old Elvet']) {
-    ffrIds[name] = db.prepare('SELECT id FROM properties WHERE name = ?').get(name)?.id;
-  }
+  ffrIds['41 Old Elvet'] = db.prepare("SELECT id FROM properties WHERE name = '41 Old Elvet'").get()?.id;
 
   const insert = db.prepare(`INSERT OR IGNORE INTO meter_readings
     (property_id, property_name, meter_type, mprn, mpan, water_ref, month, year, reading, usage_kwh, cost)
@@ -750,42 +760,16 @@ function seedMeterReadings(db) {
   oeReading('The Fordham', 'gas', 2, 2026, 4351, 113, 60.37);
   oeReading('The Talbot Penthouse', 'gas', 2, 2026, 4305, 195, 92.92);
 
-  // ===== FFR Group 2025 January =====
-  ffrReading('Flat 1 Church Hill', ffrIds['Flat 1 Church Hill'], 'gas', 1, 2025, 9505, 241, 122.14);
-  ffrReading('Flat 1 Church Hill', ffrIds['Flat 1 Church Hill'], 'electric', 1, 2025, 16180, 146, 37.80);
-  ffrReading('Flat 2 Church Hill', ffrIds['Flat 2 Church Hill'], 'gas', 1, 2025, 8530, 249, 122.77);
-  ffrReading('Flat 2 Church Hill', ffrIds['Flat 2 Church Hill'], 'electric', 1, 2025, 18489, 268, 58.46);
-  ffrReading('Flat 3 Church Hill', ffrIds['Flat 3 Church Hill'], 'gas', 1, 2025, 7616, 310, 153.29);
-  ffrReading('Flat 3 Church Hill', ffrIds['Flat 3 Church Hill'], 'electric', 1, 2025, 16489, 237, 53.18);
-  ffrReading('Flat 4 Church Hill', ffrIds['Flat 4 Church Hill'], 'gas', 1, 2025, 10026, 112, 79.12);
-  ffrReading('Flat 4 Church Hill', ffrIds['Flat 4 Church Hill'], 'electric', 1, 2025, 15205, 118, 32.92);
+  // ===== 41 Old Elvet 2025 January =====
   ffrReading('41 Old Elvet', ffrIds['41 Old Elvet'], 'gas', 1, 2025, 7637, 0, 27.02);
   ffrReading('41 Old Elvet', ffrIds['41 Old Elvet'], 'electric', 1, 2025, 20770, 657, 123.10);
 
-  // ===== FFR Group 2025 February =====
-  ffrReading('Flat 1 Church Hill', ffrIds['Flat 1 Church Hill'], 'gas', 2, 2025, 9768, 263, 128.64);
-  ffrReading('Flat 2 Church Hill', ffrIds['Flat 2 Church Hill'], 'gas', 2, 2025, 8826, 296, 139.63);
-  ffrReading('Flat 3 Church Hill', ffrIds['Flat 3 Church Hill'], 'gas', 2, 2025, 7946, 330, 158.66);
-  ffrReading('Flat 4 Church Hill', ffrIds['Flat 4 Church Hill'], 'gas', 2, 2025, 10274, 248, 130.81);
+  // ===== 41 Old Elvet 2025 February =====
   ffrReading('41 Old Elvet', ffrIds['41 Old Elvet'], 'gas', 2, 2025, 7647, 10, 31.06);
 
-  // ===== FFR Group 2026 January =====
-  ffrReading('Flat 1 Church Hill', ffrIds['Flat 1 Church Hill'], 'gas', 1, 2026, 10992, 194, 103.15);
-  ffrReading('Flat 1 Church Hill', ffrIds['Flat 1 Church Hill'], 'electric', 1, 2026, 18673, 208, 48.15);
-  ffrReading('Flat 2 Church Hill', ffrIds['Flat 2 Church Hill'], 'gas', 1, 2026, 10189, 66, 48.81);
-  ffrReading('Flat 2 Church Hill', ffrIds['Flat 2 Church Hill'], 'electric', 1, 2026, 22198, 208, 48.24);
-  ffrReading('Flat 3 Church Hill', ffrIds['Flat 3 Church Hill'], 'gas', 1, 2026, 9433, 147, 87.41);
-  ffrReading('Flat 3 Church Hill', ffrIds['Flat 3 Church Hill'], 'electric', 1, 2026, 19195, 181, 43.65);
-  ffrReading('Flat 4 Church Hill', ffrIds['Flat 4 Church Hill'], 'gas', 1, 2026, 11833, 189, 110.24);
-  ffrReading('Flat 4 Church Hill', ffrIds['Flat 4 Church Hill'], 'electric', 1, 2026, 17771, 146, 37.69);
+  // ===== 41 Old Elvet 2026 January =====
   ffrReading('41 Old Elvet', ffrIds['41 Old Elvet'], 'gas', 1, 2026, 8004, 193, 105.02);
   ffrReading('41 Old Elvet', ffrIds['41 Old Elvet'], 'electric', 1, 2026, 25828, 595, 112.75);
-
-  // ===== FFR Group 2026 February =====
-  ffrReading('Flat 1 Church Hill', ffrIds['Flat 1 Church Hill'], 'gas', 2, 2026, 11228, 236, 117.73);
-  ffrReading('Flat 2 Church Hill', ffrIds['Flat 2 Church Hill'], 'gas', 2, 2026, 10423, 234, 114.57);
-  ffrReading('Flat 3 Church Hill', ffrIds['Flat 3 Church Hill'], 'gas', 2, 2026, 9639, 206, 108.54);
-  ffrReading('Flat 4 Church Hill', ffrIds['Flat 4 Church Hill'], 'gas', 2, 2026, 12286, 453, 213.66);
 
   // Seed default utility rates
   const insertRate = db.prepare('INSERT OR IGNORE INTO utility_rates (rate_type, rate_value, effective_from, notes) VALUES (?, ?, ?, ?)');

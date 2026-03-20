@@ -87,30 +87,67 @@ router.post('/readings/bulk', authenticate, (req, res) => {
 router.get('/rates', authenticate, (req, res) => {
   const db = getDb();
   try {
+    const { property_id, property_name } = req.query;
     const rates = db.prepare(`
-      SELECT * FROM utility_rates
-      WHERE effective_to IS NULL OR effective_to >= date('now')
-      ORDER BY rate_type, effective_from DESC
+      SELECT ur.*, p.name as parent_property_name
+      FROM utility_rates ur
+      LEFT JOIN properties p ON ur.property_id = p.id
+      WHERE (ur.effective_to IS NULL OR ur.effective_to >= date('now'))
+      ORDER BY ur.property_id NULLS FIRST, ur.rate_type, ur.effective_from DESC
     `).all();
-    // Also return a simple key-value of current rates
-    const current = {};
+
+    // Build current rates: global defaults, then per-property overrides
+    const current = {};       // global defaults (property_id IS NULL)
+    const byProperty = {};    // { "propId:propName": { rate_type: value } }
+
     for (const r of rates) {
-      if (!current[r.rate_type]) current[r.rate_type] = r.rate_value;
+      const key = r.property_id ? `${r.property_id}:${r.property_name || ''}` : null;
+      if (!key) {
+        // Global rate
+        if (!current[r.rate_type]) current[r.rate_type] = r.rate_value;
+      } else {
+        // Per-property rate
+        if (!byProperty[key]) byProperty[key] = {};
+        if (!byProperty[key][r.rate_type]) byProperty[key][r.rate_type] = r.rate_value;
+      }
     }
-    res.json({ rates, current });
+
+    // If a specific property is requested, merge global + property-specific
+    let propertyRates = null;
+    if (property_id) {
+      const pKey = `${property_id}:${property_name || ''}`;
+      propertyRates = { ...current, ...(byProperty[pKey] || {}) };
+    }
+
+    res.json({ rates, current, byProperty, propertyRates });
   } finally { db.close(); }
 });
 
 router.post('/rates', authenticate, (req, res) => {
-  const { rate_type, rate_value, effective_from, effective_to, notes } = req.body;
+  const { rate_type, rate_value, effective_from, effective_to, notes, property_id, property_name } = req.body;
   if (!rate_type || rate_value == null || !effective_from) {
     return res.status(400).json({ error: 'rate_type, rate_value, and effective_from are required' });
   }
   const db = getDb();
   try {
+    // If setting a property-specific rate, expire any existing rate of same type for same property
+    if (property_id) {
+      db.prepare(`
+        UPDATE utility_rates SET effective_to = ?
+        WHERE rate_type = ? AND property_id = ? AND COALESCE(property_name, '') = COALESCE(?, '')
+          AND effective_to IS NULL
+      `).run(effective_from, rate_type, property_id, property_name || '');
+    } else {
+      // Expire global rate of same type
+      db.prepare(`
+        UPDATE utility_rates SET effective_to = ?
+        WHERE rate_type = ? AND property_id IS NULL AND effective_to IS NULL
+      `).run(effective_from, rate_type);
+    }
+
     const id = db.prepare(
-      'INSERT INTO utility_rates (rate_type, rate_value, effective_from, effective_to, notes) VALUES (?, ?, ?, ?, ?)'
-    ).run(rate_type, rate_value, effective_from, effective_to || null, notes || null).lastInsertRowid;
+      'INSERT INTO utility_rates (rate_type, rate_value, effective_from, effective_to, property_id, property_name, notes) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    ).run(rate_type, rate_value, effective_from, effective_to || null, property_id || null, property_name || null, notes || null).lastInsertRowid;
     res.json({ success: true, id });
   } finally { db.close(); }
 });
