@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../utils/api';
-import { AlertCircle, Clock, CheckCircle, AlertTriangle, Zap, TrendingUp, ShieldCheck, XCircle, ArrowUpRight, Activity, Timer, Bot, Flame, PoundSterling, Wallet, PieChart, CalendarRange, Image } from 'lucide-react';
+import { AlertCircle, Clock, CheckCircle, AlertTriangle, Zap, TrendingUp, ShieldCheck, XCircle, ArrowUpRight, Activity, Timer, Bot, Flame, PoundSterling, Wallet, PieChart, CalendarRange, Image, MessageSquareWarning } from 'lucide-react';
 
 function timeAgo(dateStr) {
   if (!dateStr) return '';
@@ -34,11 +34,13 @@ export default function Dashboard() {
   const [sla, setSla] = useState(null);
   const [budgets, setBudgets] = useState(null);
   const [compliance, setCompliance] = useState(null);
+  const [utilities, setUtilities] = useState(null);
   useEffect(() => {
     api.getIssueStats().then(setStats);
     api.getSlaMetrics().then(setSla).catch(() => {});
     api.getBudgets().then(setBudgets).catch(() => {});
     api.getComplianceSummary().then(setCompliance).catch(() => {});
+    api.getUtilityAnalytics().then(setUtilities).catch(() => {});
   }, []);
   if (!stats) return <div style={{ padding: 40, textAlign: 'center' }}><div className="loading-spinner" style={{ margin: '0 auto' }} /></div>;
 
@@ -442,6 +444,209 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
+
+      {/* Utilities Overview */}
+      {utilities && (
+        <div className="card" style={{ marginTop: 12 }}>
+          <div className="card-header" style={{ padding: '12px 16px' }}>
+            <h3 style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14 }}>
+              <Zap size={15} style={{ color: '#facc15' }} />
+              Utilities Overview
+            </h3>
+            <Link to="/utilities" className="btn btn-ghost btn-sm" style={{ fontSize: 12 }}>
+              View Details <ArrowUpRight size={12} />
+            </Link>
+          </div>
+          <div className="card-body" style={{ padding: '12px 16px' }}>
+            {(() => {
+              const props = utilities.properties || [];
+              const totalGas = props.reduce((s, p) => s + (p.gas_cost || 0), 0);
+              const totalElec = props.reduce((s, p) => s + (p.electric_cost || 0), 0);
+              const totalCombined = totalGas + totalElec;
+              const topSpender = props.length > 0
+                ? props.reduce((top, p) => ((p.gas_cost || 0) + (p.electric_cost || 0)) > ((top.gas_cost || 0) + (top.electric_cost || 0)) ? p : top, props[0])
+                : null;
+              const topSpend = topSpender ? (topSpender.gas_cost || 0) + (topSpender.electric_cost || 0) : 0;
+
+              return (
+                <>
+                  {/* Summary cards */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 16 }}>
+                    <div style={{
+                      textAlign: 'center', padding: '14px 8px', borderRadius: 'var(--radius-md)',
+                      background: 'rgba(251,191,36,0.06)', border: '1px solid rgba(251,191,36,0.1)'
+                    }}>
+                      <Flame size={16} style={{ color: '#f59e0b', marginBottom: 6 }} />
+                      <div style={{ fontSize: 20, fontWeight: 800, color: '#f59e0b', letterSpacing: '-0.03em' }}>
+                        &pound;{totalGas.toFixed(0)}
+                      </div>
+                      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 3, fontWeight: 500 }}>Gas ({utilities.year})</div>
+                    </div>
+
+                    <div style={{
+                      textAlign: 'center', padding: '14px 8px', borderRadius: 'var(--radius-md)',
+                      background: 'rgba(99,102,241,0.06)', border: '1px solid rgba(99,102,241,0.1)'
+                    }}>
+                      <Zap size={16} style={{ color: 'var(--accent-light)', marginBottom: 6 }} />
+                      <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--accent-light)', letterSpacing: '-0.03em' }}>
+                        &pound;{totalElec.toFixed(0)}
+                      </div>
+                      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 3, fontWeight: 500 }}>Electric ({utilities.year})</div>
+                    </div>
+
+                    <div style={{
+                      textAlign: 'center', padding: '14px 8px', borderRadius: 'var(--radius-md)',
+                      background: 'rgba(52,211,153,0.06)', border: '1px solid rgba(52,211,153,0.1)'
+                    }}>
+                      <PoundSterling size={16} style={{ color: 'var(--success)', marginBottom: 6 }} />
+                      <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--success)', letterSpacing: '-0.03em' }}>
+                        &pound;{totalCombined.toFixed(0)}
+                      </div>
+                      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 3, fontWeight: 500 }}>Combined Total</div>
+                    </div>
+
+                    <div style={{
+                      textAlign: 'center', padding: '14px 8px', borderRadius: 'var(--radius-md)',
+                      background: 'rgba(248,113,113,0.06)', border: '1px solid rgba(248,113,113,0.1)'
+                    }}>
+                      <TrendingUp size={16} style={{ color: 'var(--danger)', marginBottom: 6 }} />
+                      <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--danger)', letterSpacing: '-0.03em' }}>
+                        &pound;{topSpend.toFixed(0)}
+                      </div>
+                      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 3, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {topSpender?.name || 'N/A'}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Top 5 properties by spend */}
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 10 }}>Top Properties by Spend</div>
+                    {props
+                      .map(p => ({ ...p, total: (p.gas_cost || 0) + (p.electric_cost || 0) }))
+                      .sort((a, b) => b.total - a.total)
+                      .slice(0, 5)
+                      .map((p, i) => {
+                        const maxTotal = props.reduce((m, x) => Math.max(m, (x.gas_cost || 0) + (x.electric_cost || 0)), 1);
+                        const pct = (p.total / maxTotal) * 100;
+                        return (
+                          <div key={p.name} style={{ marginBottom: i < 4 ? 10 : 0 }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
+                              <span style={{ fontSize: 12, color: 'var(--text-primary)', fontWeight: 450 }}>{p.name}</span>
+                              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--accent-light)' }}>&pound;{p.total.toFixed(0)}</span>
+                            </div>
+                            <div style={{ height: 6, background: 'rgba(99,102,241,0.08)', borderRadius: 3, overflow: 'hidden', display: 'flex' }}>
+                              <div style={{
+                                height: '100%',
+                                width: `${(p.gas_cost || 0) / maxTotal * 100}%`,
+                                background: '#f59e0b',
+                                borderRadius: '3px 0 0 3px'
+                              }} />
+                              <div style={{
+                                height: '100%',
+                                width: `${(p.electric_cost || 0) / maxTotal * 100}%`,
+                                background: 'var(--accent-light)',
+                                borderRadius: '0 3px 3px 0'
+                              }} />
+                            </div>
+                          </div>
+                        );
+                      })
+                    }
+                    <div style={{ display: 'flex', gap: 16, marginTop: 10 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 10, color: 'var(--text-muted)' }}>
+                        <div style={{ width: 10, height: 10, borderRadius: 2, background: '#f59e0b' }} /> Gas
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 10, color: 'var(--text-muted)' }}>
+                        <div style={{ width: 10, height: 10, borderRadius: 2, background: 'var(--accent-light)' }} /> Electric
+                      </div>
+                    </div>
+                  </div>
+                </>
+              );
+            })()}
+          </div>
+        </div>
+      )}
+
+      {/* Tenant Complaint Tracker */}
+      {stats.top_complainers?.length > 0 && (
+        <div className="card" style={{ marginTop: 12 }}>
+          <div className="card-header" style={{ padding: '12px 16px' }}>
+            <h3 style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14 }}>
+              <MessageSquareWarning size={15} style={{ color: '#f97316' }} />
+              Complaint Tracker
+            </h3>
+            <Link to="/tenants" className="btn btn-ghost btn-sm" style={{ fontSize: 12 }}>
+              View All Tenants <ArrowUpRight size={12} />
+            </Link>
+          </div>
+          <div className="card-body" style={{ padding: '0 16px 12px' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                  <th style={{ textAlign: 'left', padding: '10px 8px', fontSize: 11, color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>#</th>
+                  <th style={{ textAlign: 'left', padding: '10px 8px', fontSize: 11, color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Tenant</th>
+                  <th style={{ textAlign: 'left', padding: '10px 8px', fontSize: 11, color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Property</th>
+                  <th style={{ textAlign: 'center', padding: '10px 8px', fontSize: 11, color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Total</th>
+                  <th style={{ textAlign: 'center', padding: '10px 8px', fontSize: 11, color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Open</th>
+                  <th style={{ textAlign: 'right', padding: '10px 8px', fontSize: 11, color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Last Issue</th>
+                </tr>
+              </thead>
+              <tbody>
+                {stats.top_complainers.map((t, i) => {
+                  const maxCount = stats.top_complainers[0]?.issue_count || 1;
+                  return (
+                    <tr
+                      key={t.id}
+                      style={{
+                        borderBottom: '1px solid rgba(255,255,255,0.03)',
+                        cursor: 'pointer',
+                        transition: 'background 0.15s'
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.background = 'rgba(99,102,241,0.04)'}
+                      onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                    >
+                      <td style={{ padding: '8px', color: 'var(--text-muted)', fontSize: 12, fontWeight: 600 }}>{i + 1}</td>
+                      <td style={{ padding: '8px' }}>
+                        <Link to={`/tenants/${t.id}/issues`} style={{ color: 'var(--text-primary)', textDecoration: 'none', fontWeight: 500 }}>
+                          {t.tenant_name}
+                          {t.flat_number && <span style={{ color: 'var(--text-muted)', fontWeight: 400, marginLeft: 6, fontSize: 11 }}>{t.flat_number}</span>}
+                        </Link>
+                      </td>
+                      <td style={{ padding: '8px', color: 'var(--text-secondary)', fontSize: 12 }}>{t.property_name || '-'}</td>
+                      <td style={{ padding: '8px', textAlign: 'center' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                          <div style={{ width: 50, height: 5, background: 'rgba(249,115,22,0.1)', borderRadius: 3, overflow: 'hidden' }}>
+                            <div style={{ height: '100%', width: `${(t.issue_count / maxCount) * 100}%`, background: '#f97316', borderRadius: 3 }} />
+                          </div>
+                          <span style={{ fontWeight: 700, color: '#f97316', fontSize: 13, minWidth: 20 }}>{t.issue_count}</span>
+                        </div>
+                      </td>
+                      <td style={{ padding: '8px', textAlign: 'center' }}>
+                        {t.open_count > 0 ? (
+                          <span style={{
+                            display: 'inline-flex', alignItems: 'center', gap: 4,
+                            background: 'rgba(248,113,113,0.12)', color: 'var(--danger)',
+                            padding: '2px 8px', borderRadius: 10, fontSize: 11, fontWeight: 600
+                          }}>
+                            {t.open_count}
+                          </span>
+                        ) : (
+                          <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>-</span>
+                        )}
+                      </td>
+                      <td style={{ padding: '8px', textAlign: 'right', fontSize: 11, color: 'var(--text-muted)' }}>
+                        {t.last_issue_at ? timeAgo(t.last_issue_at) : '-'}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

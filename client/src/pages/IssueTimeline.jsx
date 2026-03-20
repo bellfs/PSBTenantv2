@@ -137,7 +137,7 @@ export default function IssueTimeline({ compact = false }) {
   const [loading, setLoading] = useState(true);
   const [tooltip, setTooltip] = useState(null);
   const [statusFilter, setStatusFilter] = useState('all');
-  const [viewWeeks, setViewWeeks] = useState(compact ? 4 : 8);
+  const [viewWeeks, setViewWeeks] = useState(compact ? 4 : 2);
   const [offset, setOffset] = useState(0);
   const containerRef = useRef(null);
   const navigate = useNavigate();
@@ -278,7 +278,7 @@ export default function IssueTimeline({ compact = false }) {
 
         {!compact && (
           <div style={{ display: 'flex', gap: 4 }}>
-            {[4, 8, 12].map(w => (
+            {[2, 4, 8, 12].map(w => (
               <button
                 key={w}
                 className={`btn btn-sm ${viewWeeks === w ? 'btn-primary' : 'btn-ghost'}`}

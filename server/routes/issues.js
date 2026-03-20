@@ -71,6 +71,19 @@ router.get('/stats', authenticate, (req, res) => {
           (SELECT file_path FROM attachments WHERE issue_id = i.id LIMIT 1) as thumbnail
         FROM issues i LEFT JOIN tenants t ON i.tenant_id = t.id LEFT JOIN properties p ON i.property_id = p.id
         ORDER BY i.created_at DESC LIMIT 8
+      `).all(),
+      top_complainers: db.prepare(`
+        SELECT t.id, t.name as tenant_name, t.flat_number, p.name as property_name,
+          COUNT(*) as issue_count,
+          SUM(CASE WHEN i.status NOT IN ('resolved','closed') THEN 1 ELSE 0 END) as open_count,
+          MAX(i.created_at) as last_issue_at
+        FROM issues i
+        LEFT JOIN tenants t ON i.tenant_id = t.id
+        LEFT JOIN properties p ON i.property_id = p.id
+        WHERE t.id IS NOT NULL
+        GROUP BY t.id
+        ORDER BY issue_count DESC
+        LIMIT 10
       `).all()
     });
   } finally { db.close(); }
