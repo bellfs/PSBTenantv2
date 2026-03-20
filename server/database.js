@@ -363,8 +363,11 @@ async function initialiseDatabase() {
   // --- One-time reseed: clear old tenants, keep only current year ---
   const tenantReseedFlag = db.prepare("SELECT value FROM settings WHERE key = 'tenant_reseed_v3'").get();
   if (!tenantReseedFlag) {
+    // Temporarily disable foreign keys to allow tenant cleanup
+    db.pragma('foreign_keys = OFF');
     db.exec('DELETE FROM tenancies');
     db.exec('DELETE FROM tenants');
+    db.pragma('foreign_keys = ON');
     db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('tenant_reseed_v3', '1')").run();
     console.log('  Cleared tenants for current-year-only reseed');
   }
