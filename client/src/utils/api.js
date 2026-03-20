@@ -124,4 +124,5 @@ export const api = {
   getUtilityFairUsage: () => request('/utilities/fair-usage'),
   saveUtilityFairUsage: (data) => request('/utilities/fair-usage', { method: 'POST', body: JSON.stringify(data) }),
   checkUtilityOverusage: (month, year) => request('/utilities/check-overusage', { method: 'POST', body: JSON.stringify({ month, year }) }),
+  getUtilityMeterRefs: () => request('/utilities/meter-refs'),
 };

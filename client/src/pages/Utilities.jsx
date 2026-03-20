@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { api } from '../utils/api';
-import { Zap, Flame, Save, AlertTriangle, TrendingUp, PoundSterling, BarChart3, Settings, ClipboardList, RefreshCw, ChevronDown, Plus, Trash2, CheckCircle } from 'lucide-react';
+import { Zap, Flame, Save, AlertTriangle, TrendingUp, PoundSterling, BarChart3, Settings, ClipboardList, RefreshCw, ChevronDown, Plus, Trash2, CheckCircle, Hash } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   AreaChart, Area, LineChart, Line, Legend, PieChart, Pie, Cell
@@ -71,6 +71,10 @@ export default function Utilities() {
   const [fairUsage, setFairUsage] = useState([]);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
 
+  // Meter refs tab state
+  const [meterRefs, setMeterRefs] = useState([]);
+  const [meterRefsLoading, setMeterRefsLoading] = useState(false);
+
   // Rates tab state
   const [allRates, setAllRates] = useState({ rates: [], current: {}, byProperty: {} });
   const [rateForm, setRateForm] = useState({ rate_type: 'gas_unit_rate', rate_value: '', effective_from: new Date().toISOString().split('T')[0], notes: '', property_id: '', property_name: '' });
@@ -119,6 +123,17 @@ export default function Utilities() {
       }).catch(() => setAnalyticsLoading(false));
     }
   }, [tab, dashYear]);
+
+  // Load meter refs tab data
+  useEffect(() => {
+    if (tab === 'meters') {
+      setMeterRefsLoading(true);
+      api.getUtilityMeterRefs().then(refs => {
+        setMeterRefs(refs);
+        setMeterRefsLoading(false);
+      }).catch(() => setMeterRefsLoading(false));
+    }
+  }, [tab]);
 
   // Load rates tab data
   useEffect(() => {
@@ -381,6 +396,7 @@ export default function Utilities() {
     ['readings', 'Meter Readings', <ClipboardList size={15} key="r" />],
     ['dashboard', 'Usage Dashboard', <BarChart3 size={15} key="d" />],
     ['analytics', 'Analytics & Charts', <TrendingUp size={15} key="a" />],
+    ['meters', 'Meter Numbers', <Hash size={15} key="m" />],
     ['rates', 'Rates & Settings', <Settings size={15} key="s" />]
   ];
 
@@ -1020,7 +1036,74 @@ export default function Utilities() {
         </div>
       )}
 
-      {/* ===== TAB 4: RATES & SETTINGS ===== */}
+      {/* ===== TAB 4: METER NUMBERS ===== */}
+      {tab === 'meters' && (
+        <div>
+          {meterRefsLoading ? (
+            <div style={{ padding: 60, textAlign: 'center' }}><div className="loading-spinner" style={{ margin: '0 auto' }} /></div>
+          ) : (
+            <div className="card">
+              <div className="card-header">
+                <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Hash size={16} style={{ color: 'var(--accent-light)' }} />
+                  Meter Reference Numbers
+                </h3>
+              </div>
+              {meterRefs.length > 0 ? (
+                <div className="table-container">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Property</th>
+                        <th>Unit / Apartment</th>
+                        <th>Type</th>
+                        <th>MPRN (Gas)</th>
+                        <th>MPAN (Electric)</th>
+                        <th>Water Ref</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(() => {
+                        // Group by property + apartment to avoid duplicates
+                        const seen = new Set();
+                        return meterRefs.filter(r => {
+                          const key = `${r.property_id}:${r.property_name || ''}:${r.meter_type}`;
+                          if (seen.has(key)) return false;
+                          seen.add(key);
+                          return true;
+                        }).map((r, i) => (
+                          <tr key={i}>
+                            <td style={{ fontWeight: 500 }}>{r.parent_property_name || 'Unknown'}</td>
+                            <td style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{r.property_name && r.property_name !== r.parent_property_name ? r.property_name : '-'}</td>
+                            <td>
+                              <span style={{
+                                display: 'inline-flex', alignItems: 'center', gap: 4,
+                                color: r.meter_type === 'gas' ? GAS_COLOR : ELEC_COLOR, fontWeight: 500, fontSize: 13
+                              }}>
+                                {r.meter_type === 'gas' ? <Flame size={13} /> : <Zap size={13} />}
+                                {r.meter_type}
+                              </span>
+                            </td>
+                            <td style={{ fontFamily: 'monospace', fontSize: 13, color: r.mprn ? 'var(--text-primary)' : 'var(--text-muted)' }}>{r.mprn || '-'}</td>
+                            <td style={{ fontFamily: 'monospace', fontSize: 13, color: r.mpan ? 'var(--text-primary)' : 'var(--text-muted)' }}>{r.mpan || '-'}</td>
+                            <td style={{ fontFamily: 'monospace', fontSize: 13, color: r.water_ref ? 'var(--text-primary)' : 'var(--text-muted)' }}>{r.water_ref || '-'}</td>
+                          </tr>
+                        ));
+                      })()}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="card-body" style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 40 }}>
+                  No meter reference numbers found. Meter references are stored when readings are entered with MPRN/MPAN details.
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ===== TAB 5: RATES & SETTINGS ===== */}
       {tab === 'rates' && (() => {
         // Build property options for the rate view selector (includes 52 OE apartments)
         const ratePropertyOptions = [];

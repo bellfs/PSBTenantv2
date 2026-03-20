@@ -487,4 +487,22 @@ router.post('/check-overusage', authenticate, async (req, res) => {
   } finally { db.close(); }
 });
 
+// ===== METER REFERENCES =====
+router.get('/meter-refs', authenticate, (req, res) => {
+  const db = getDb();
+  try {
+    // Get distinct meter references from readings, grouped by property
+    const refs = db.prepare(`
+      SELECT DISTINCT mr.property_id, mr.property_name,
+        mr.meter_type, mr.mprn, mr.mpan, mr.water_ref,
+        p.name as parent_property_name
+      FROM meter_readings mr
+      LEFT JOIN properties p ON mr.property_id = p.id
+      WHERE mr.mprn IS NOT NULL OR mr.mpan IS NOT NULL OR mr.water_ref IS NOT NULL
+      ORDER BY p.name, mr.property_name, mr.meter_type
+    `).all();
+    res.json(refs);
+  } finally { db.close(); }
+});
+
 module.exports = router;

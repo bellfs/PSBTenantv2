@@ -635,13 +635,20 @@ function seedMeterReadings(db) {
   if (!oeRow) { console.log('  [Seed] 52 Old Elvet not found, skipping meter readings'); return; }
   const oeId = oeRow.id;
 
-  // Ensure 41 Old Elvet property exists
-  if (!db.prepare("SELECT id FROM properties WHERE name = '41 Old Elvet'").get()) {
-    db.prepare('INSERT INTO properties (name, address, postcode, num_units) VALUES (?, ?, ?, ?)').run('41 Old Elvet', '41 Old Elvet, Durham', 'DH1', 1);
+  // Ensure FFR Group properties exist
+  for (const [name, addr] of [
+    ['41 Old Elvet', '41 Old Elvet, Durham'],
+    ['2 St Margarets Mews', '2 St Margarets Mews, Durham'],
+  ]) {
+    if (!db.prepare('SELECT id FROM properties WHERE name = ?').get(name)) {
+      db.prepare('INSERT INTO properties (name, address, postcode, num_units) VALUES (?, ?, ?, ?)').run(name, addr, 'DH1', 1);
+    }
   }
 
   const ffrIds = {};
-  ffrIds['41 Old Elvet'] = db.prepare("SELECT id FROM properties WHERE name = '41 Old Elvet'").get()?.id;
+  for (const name of ['Flass House Upper','Flass Court 2B','Flass Court 2A','Flass Court Lower','33 Old Elvet','41 Old Elvet','35 St Andrews Court','7 Cathedrals','2 St Margarets Mews']) {
+    ffrIds[name] = db.prepare('SELECT id FROM properties WHERE name = ?').get(name)?.id;
+  }
 
   const insert = db.prepare(`INSERT OR IGNORE INTO meter_readings
     (property_id, property_name, meter_type, mprn, mpan, water_ref, month, year, reading, usage_kwh, cost)
@@ -672,10 +679,24 @@ function seedMeterReadings(db) {
       month, year, reading, usage || 0, cost || 0);
   }
 
+  // FFR Group meter references
+  const ffrRefs = {
+    'Flass House Upper': { mprn: '486 969 04', mpan: '15 9102 7863 104' },
+    'Flass Court 2B':    { mprn: null, mpan: '15 8000 0497 483' },
+    'Flass Court 2A':    { mprn: null, mpan: '15 8000 0497 474' },
+    'Flass Court Lower': { mprn: null, mpan: '15 8000 0497 465' },
+    '33 Old Elvet':      { mprn: null, mpan: '15 9105 4866 150' },
+    '41 Old Elvet':      { mprn: '1345 209 802', mpan: '15 9104 2184 581' },
+    '35 St Andrews Court': { mprn: null, mpan: '15 8000 0125 132' },
+    '7 Cathedrals':      { mprn: null, mpan: '15 8000 0566 393' },
+    '2 St Margarets Mews': { mprn: '1', mpan: null },
+  };
+
   // Helper: insert reading for FFR property
   function ffrReading(propName, propId, meterType, month, year, reading, usage, cost) {
     if (reading == null && usage == null && cost == null) return;
-    insert.run(propId, propName, meterType, null, null, null, month, year, reading, usage || 0, cost || 0);
+    const refs = ffrRefs[propName] || {};
+    insert.run(propId, propName, meterType, refs.mprn || null, refs.mpan || null, null, month, year, reading, usage || 0, cost || 0);
   }
 
   // ===== 52 OE 2025 January =====
@@ -760,16 +781,101 @@ function seedMeterReadings(db) {
   oeReading('The Fordham', 'gas', 2, 2026, 4351, 113, 60.37);
   oeReading('The Talbot Penthouse', 'gas', 2, 2026, 4305, 195, 92.92);
 
-  // ===== 41 Old Elvet 2025 January =====
+  // ===== FFR Group 2025 =====
+  // Flass House Upper
+  ffrReading('Flass House Upper', ffrIds['Flass House Upper'], 'gas', 1, 2025, 27325, 755, 368.62);
+  ffrReading('Flass House Upper', ffrIds['Flass House Upper'], 'electric', 1, 2025, 55498, 503, 97.39);
+  ffrReading('Flass House Upper', ffrIds['Flass House Upper'], 'gas', 2, 2025, 28190, 865, 406.94);
+  ffrReading('Flass House Upper', ffrIds['Flass House Upper'], 'electric', 2, 2025, 56019, 521, 100.40);
+  ffrReading('Flass House Upper', ffrIds['Flass House Upper'], 'gas', 3, 2025, 28946, 756, 369.02);
+  ffrReading('Flass House Upper', ffrIds['Flass House Upper'], 'electric', 3, 2025, 56745, 726, 134.62);
+  ffrReading('Flass House Upper', ffrIds['Flass House Upper'], 'gas', 4, 2025, 30047, 1101, 506.41);
+  ffrReading('Flass House Upper', ffrIds['Flass House Upper'], 'electric', 4, 2025, 57470, 725, 134.45);
+  ffrReading('Flass House Upper', ffrIds['Flass House Upper'], 'gas', 5, 2025, 30600, 553, 286.98);
+  ffrReading('Flass House Upper', ffrIds['Flass House Upper'], 'electric', 5, 2025, 58126, 656, 122.93);
+  ffrReading('Flass House Upper', ffrIds['Flass House Upper'], 'gas', 9, 2025, 31318, 71, 90.12);
+  ffrReading('Flass House Upper', ffrIds['Flass House Upper'], 'gas', 10, 2025, 31580, 262, 169.36);
+  ffrReading('Flass House Upper', ffrIds['Flass House Upper'], 'electric', 10, 2025, 59950, 302, 63.84);
+  ffrReading('Flass House Upper', ffrIds['Flass House Upper'], 'gas', 11, 2025, 32379, 799, 384.36);
+  ffrReading('Flass House Upper', ffrIds['Flass House Upper'], 'electric', 11, 2025, 60767, 817, 149.81);
+  ffrReading('Flass House Upper', ffrIds['Flass House Upper'], 'gas', 12, 2025, 33206, 827, 397.72);
+  ffrReading('Flass House Upper', ffrIds['Flass House Upper'], 'electric', 12, 2025, 61863, 1096, 196.39);
+  // Flass Court 2B (Day+Night combined)
+  ffrReading('Flass Court 2B', ffrIds['Flass Court 2B'], 'electric', 1, 2025, 30831, 589, 112.97);
+  ffrReading('Flass Court 2B', ffrIds['Flass Court 2B'], 'electric', 2, 2025, 31696, 1149, 205.74);
+  ffrReading('Flass Court 2B', ffrIds['Flass Court 2B'], 'electric', 3, 2025, 32568, 1136, 204.35);
+  ffrReading('Flass Court 2B', ffrIds['Flass Court 2B'], 'electric', 4, 2025, 33368, 1004, 183.48);
+  ffrReading('Flass Court 2B', ffrIds['Flass Court 2B'], 'electric', 5, 2025, 33687, 379, 78.05);
+  ffrReading('Flass Court 2B', ffrIds['Flass Court 2B'], 'electric', 10, 2025, 34841, 141, 35.60);
+  ffrReading('Flass Court 2B', ffrIds['Flass Court 2B'], 'electric', 11, 2025, 35567, 786, 151.12);
+  ffrReading('Flass Court 2B', ffrIds['Flass Court 2B'], 'electric', 12, 2025, 36464, 1013, 189.24);
+  // Flass Court 2A (Day+Night combined)
+  ffrReading('Flass Court 2A', ffrIds['Flass Court 2A'], 'electric', 1, 2025, 6799, 687, 133.41);
+  ffrReading('Flass Court 2A', ffrIds['Flass Court 2A'], 'electric', 2, 2025, 7605, 895, 169.23);
+  ffrReading('Flass Court 2A', ffrIds['Flass Court 2A'], 'electric', 5, 2025, 9960, 706, 134.51);
+  ffrReading('Flass Court 2A', ffrIds['Flass Court 2A'], 'electric', 10, 2025, 11694, 452, 89.12);
+  ffrReading('Flass Court 2A', ffrIds['Flass Court 2A'], 'electric', 11, 2025, 12368, 873, 160.10);
+  ffrReading('Flass Court 2A', ffrIds['Flass Court 2A'], 'electric', 12, 2025, 13478, 1509, 264.80);
+  // Flass Court Lower (Day+Night combined)
+  ffrReading('Flass Court Lower', ffrIds['Flass Court Lower'], 'electric', 1, 2025, 7363, 223, 45.61);
+  ffrReading('Flass Court Lower', ffrIds['Flass Court Lower'], 'electric', 2, 2025, 8180, 1047, 189.96);
+  ffrReading('Flass Court Lower', ffrIds['Flass Court Lower'], 'electric', 3, 2025, 8934, 1121, 196.80);
+  ffrReading('Flass Court Lower', ffrIds['Flass Court Lower'], 'electric', 4, 2025, 9602, 957, 171.03);
+  ffrReading('Flass Court Lower', ffrIds['Flass Court Lower'], 'electric', 5, 2025, 9912, 393, 79.47);
+  ffrReading('Flass Court Lower', ffrIds['Flass Court Lower'], 'electric', 10, 2025, 12665, 1140, 204.73);
+  ffrReading('Flass Court Lower', ffrIds['Flass Court Lower'], 'electric', 11, 2025, 14359, 2173, 380.39);
+  ffrReading('Flass Court Lower', ffrIds['Flass Court Lower'], 'electric', 12, 2025, 16124, 2311, 402.01);
+  // 33 Old Elvet (electric only - individual meter)
+  ffrReading('33 Old Elvet', ffrIds['33 Old Elvet'], 'electric', 10, 2025, 175332, 893, 155.84);
+  // 41 Old Elvet
   ffrReading('41 Old Elvet', ffrIds['41 Old Elvet'], 'gas', 1, 2025, 7637, 0, 27.02);
   ffrReading('41 Old Elvet', ffrIds['41 Old Elvet'], 'electric', 1, 2025, 20770, 657, 123.10);
-
-  // ===== 41 Old Elvet 2025 February =====
   ffrReading('41 Old Elvet', ffrIds['41 Old Elvet'], 'gas', 2, 2025, 7647, 10, 31.06);
+  ffrReading('41 Old Elvet', ffrIds['41 Old Elvet'], 'electric', 2, 2025, 21480, 710, 131.95);
+  ffrReading('41 Old Elvet', ffrIds['41 Old Elvet'], 'gas', 3, 2025, 7668, 21, 35.50);
+  ffrReading('41 Old Elvet', ffrIds['41 Old Elvet'], 'electric', 3, 2025, 22234, 754, 139.29);
+  ffrReading('41 Old Elvet', ffrIds['41 Old Elvet'], 'gas', 4, 2025, 7743, 75, 57.33);
+  ffrReading('41 Old Elvet', ffrIds['41 Old Elvet'], 'electric', 4, 2025, 23084, 850, 155.32);
+  ffrReading('41 Old Elvet', ffrIds['41 Old Elvet'], 'electric', 5, 2025, 23678, 594, 112.58);
+  ffrReading('41 Old Elvet', ffrIds['41 Old Elvet'], 'electric', 7, 2025, 24160, 482, 93.89);
+  // 35 St Andrews Court (Day+Night combined)
+  ffrReading('35 St Andrews Court', ffrIds['35 St Andrews Court'], 'electric', 1, 2025, 41134, 65, 37.70);
+  ffrReading('35 St Andrews Court', ffrIds['35 St Andrews Court'], 'electric', 2, 2025, 41362, 272, 72.25);
+  ffrReading('35 St Andrews Court', ffrIds['35 St Andrews Court'], 'electric', 3, 2025, 41659, 347, 84.77);
+  ffrReading('35 St Andrews Court', ffrIds['35 St Andrews Court'], 'electric', 4, 2025, 41756, 117, 46.38);
+  ffrReading('35 St Andrews Court', ffrIds['35 St Andrews Court'], 'electric', 5, 2025, 41860, 113, 45.71);
+  ffrReading('35 St Andrews Court', ffrIds['35 St Andrews Court'], 'electric', 8, 2025, 42139, 105, 44.37);
+  // 7 Cathedrals
+  ffrReading('7 Cathedrals', ffrIds['7 Cathedrals'], 'electric', 1, 2025, 13036, 526, 101.23);
+  ffrReading('7 Cathedrals', ffrIds['7 Cathedrals'], 'electric', 2, 2025, 14043, 1007, 181.53);
+  ffrReading('7 Cathedrals', ffrIds['7 Cathedrals'], 'electric', 3, 2025, 15086, 1043, 187.54);
+  ffrReading('7 Cathedrals', ffrIds['7 Cathedrals'], 'electric', 4, 2025, 16429, 1343, 237.62);
+  ffrReading('7 Cathedrals', ffrIds['7 Cathedrals'], 'electric', 5, 2025, 16750, 321, 67.01);
+  ffrReading('7 Cathedrals', ffrIds['7 Cathedrals'], 'electric', 11, 2025, 18002, 890, 162.00);
+  ffrReading('7 Cathedrals', ffrIds['7 Cathedrals'], 'electric', 12, 2025, 18905, 903, 164.17);
+  // 2 St Margarets Mews
+  ffrReading('2 St Margarets Mews', ffrIds['2 St Margarets Mews'], 'gas', 1, 2025, 5361, 91, 148.74);
+  ffrReading('2 St Margarets Mews', ffrIds['2 St Margarets Mews'], 'electric', 1, 2025, 10994, 93, 42.88);
+  ffrReading('2 St Margarets Mews', ffrIds['2 St Margarets Mews'], 'gas', 2, 2025, 5417, 56, 99.31);
+  ffrReading('2 St Margarets Mews', ffrIds['2 St Margarets Mews'], 'electric', 2, 2025, 11067, 73, 36.31);
+  ffrReading('2 St Margarets Mews', ffrIds['2 St Margarets Mews'], 'gas', 3, 2025, 5566, 149, 123.69);
+  ffrReading('2 St Margarets Mews', ffrIds['2 St Margarets Mews'], 'electric', 3, 2025, 11164, 97, 43.77);
+  ffrReading('2 St Margarets Mews', ffrIds['2 St Margarets Mews'], 'gas', 4, 2025, 5630, 64, 111.76);
+  ffrReading('2 St Margarets Mews', ffrIds['2 St Margarets Mews'], 'electric', 4, 2025, 11262, 98, 43.27);
+  ffrReading('2 St Margarets Mews', ffrIds['2 St Margarets Mews'], 'gas', 5, 2025, 5665, 35, 73.83);
+  ffrReading('2 St Margarets Mews', ffrIds['2 St Margarets Mews'], 'electric', 5, 2025, 11351, 89, 42.00);
 
-  // ===== 41 Old Elvet 2026 January =====
+  // ===== FFR Group 2026 =====
+  ffrReading('Flass House Upper', ffrIds['Flass House Upper'], 'electric', 1, 2026, 62034, 171, 41.97);
+  ffrReading('Flass Court 2B', ffrIds['Flass Court 2B'], 'electric', 1, 2026, 36859, 460, 92.35);
+  ffrReading('Flass Court 2A', ffrIds['Flass Court 2A'], 'electric', 1, 2026, 14052, 773, 142.15);
+  ffrReading('Flass Court Lower', ffrIds['Flass Court Lower'], 'electric', 1, 2026, 18132, 2814, 480.07);
   ffrReading('41 Old Elvet', ffrIds['41 Old Elvet'], 'gas', 1, 2026, 8004, 193, 105.02);
   ffrReading('41 Old Elvet', ffrIds['41 Old Elvet'], 'electric', 1, 2026, 25828, 595, 112.75);
+  ffrReading('7 Cathedrals', ffrIds['7 Cathedrals'], 'electric', 1, 2026, 19264, 359, 73.35);
+  ffrReading('2 St Margarets Mews', ffrIds['2 St Margarets Mews'], 'gas', 2, 2026, 269, 269, 384.23);
+  ffrReading('2 St Margarets Mews', ffrIds['2 St Margarets Mews'], 'gas', 3, 2026, 498, 229, 156.03);
+  ffrReading('2 St Margarets Mews', ffrIds['2 St Margarets Mews'], 'electric', 3, 2026, 12270, 178, 61.65);
 
   // Seed default utility rates
   const insertRate = db.prepare('INSERT OR IGNORE INTO utility_rates (rate_type, rate_value, effective_from, notes) VALUES (?, ?, ?, ?)');
