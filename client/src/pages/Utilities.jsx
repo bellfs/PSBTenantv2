@@ -717,7 +717,7 @@ export default function Utilities() {
                         <CartesianGrid strokeDasharray="3 3" stroke="#2a2a3a" />
                         <XAxis type="number" tick={tickStyle} tickFormatter={v => `£${v}`} />
                         <YAxis dataKey="name" type="category" tick={tickStyle} width={140} />
-                        <Tooltip contentStyle={tooltipStyle} formatter={(v, name) => [`£${Number(v).toFixed(2)}`, name === 'gas' ? 'Gas' : 'Electric']} />
+                        <Tooltip contentStyle={tooltipStyle} formatter={(v, name) => [`£${Number(v).toFixed(2)}`, name]} />
                         <Legend />
                         <Bar dataKey="gas" fill={GAS_COLOR} radius={[0, 4, 4, 0]} stackId="a" name="Gas" />
                         <Bar dataKey="electric" fill={ELEC_COLOR} radius={[0, 4, 4, 0]} stackId="a" name="Electric" />
@@ -742,7 +742,7 @@ export default function Utilities() {
                         <CartesianGrid strokeDasharray="3 3" stroke="#2a2a3a" />
                         <XAxis type="number" tick={tickStyle} tickFormatter={v => `${v} kWh`} />
                         <YAxis dataKey="name" type="category" tick={tickStyle} width={140} />
-                        <Tooltip contentStyle={tooltipStyle} formatter={(v, name) => [`${Number(v).toLocaleString()} kWh`, name === 'gas' ? 'Gas' : 'Electric']} />
+                        <Tooltip contentStyle={tooltipStyle} formatter={(v, name) => [`${Number(v).toLocaleString()} kWh`, name]} />
                         <Legend />
                         <Bar dataKey="gas" fill={GAS_COLOR} radius={[0, 4, 4, 0]} stackId="a" name="Gas" />
                         <Bar dataKey="electric" fill={ELEC_COLOR} radius={[0, 4, 4, 0]} stackId="a" name="Electric" />
@@ -961,7 +961,7 @@ export default function Utilities() {
                           <CartesianGrid strokeDasharray="3 3" stroke="#2a2a3a" />
                           <XAxis type="number" tick={tickStyle} tickFormatter={v => `\u00A3${v}`} />
                           <YAxis dataKey="name" type="category" tick={tickStyle} width={120} />
-                          <Tooltip contentStyle={tooltipStyle} formatter={(v, name) => [`\u00A3${Number(v).toFixed(2)}`, name === 'gas' ? 'Gas' : 'Electric']} />
+                          <Tooltip contentStyle={tooltipStyle} formatter={(v, name) => [`\u00A3${Number(v).toFixed(2)}`, name]} />
                           <Legend />
                           <Bar dataKey="gas" fill={GAS_COLOR} radius={[0, 4, 4, 0]} stackId="a" name="Gas" />
                           <Bar dataKey="electric" fill={ELEC_COLOR} radius={[0, 4, 4, 0]} stackId="a" name="Electric" />

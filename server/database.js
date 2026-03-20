@@ -363,6 +363,21 @@ async function initialiseDatabase() {
   // --- Seed tenants from spreadsheet data ---
   seedTenants(db);
 
+  // --- Remove Church Hill properties (not ours) ---
+  for (const chName of ['Flat 1 Church Hill','Flat 2 Church Hill','Flat 3 Church Hill','Flat 4 Church Hill']) {
+    const chProp = db.prepare('SELECT id FROM properties WHERE name = ?').get(chName);
+    if (chProp) {
+      db.prepare('DELETE FROM meter_readings WHERE property_id = ?').run(chProp.id);
+      try { db.prepare('DELETE FROM utility_alerts WHERE property_id = ?').run(chProp.id); } catch(e) {}
+      try { db.prepare('DELETE FROM fair_usage_limits WHERE property_id = ?').run(chProp.id); } catch(e) {}
+      try { db.prepare('DELETE FROM compliance_certificates WHERE property_id = ?').run(chProp.id); } catch(e) {}
+      try { db.prepare('DELETE FROM documents WHERE property_id = ?').run(chProp.id); } catch(e) {}
+      try { db.prepare('DELETE FROM property_budgets WHERE property_id = ?').run(chProp.id); } catch(e) {}
+      db.prepare('DELETE FROM properties WHERE id = ?').run(chProp.id);
+      console.log(`  Removed Church Hill property: ${chName}`);
+    }
+  }
+
   // --- Seed meter readings from spreadsheet data ---
   seedMeterReadings(db);
 
@@ -623,21 +638,6 @@ function seedMeterReadings(db) {
   // Ensure 41 Old Elvet property exists
   if (!db.prepare("SELECT id FROM properties WHERE name = '41 Old Elvet'").get()) {
     db.prepare('INSERT INTO properties (name, address, postcode, num_units) VALUES (?, ?, ?, ?)').run('41 Old Elvet', '41 Old Elvet, Durham', 'DH1', 1);
-  }
-
-  // Remove Church Hill properties (not ours)
-  for (const chName of ['Flat 1 Church Hill','Flat 2 Church Hill','Flat 3 Church Hill','Flat 4 Church Hill']) {
-    const chProp = db.prepare('SELECT id FROM properties WHERE name = ?').get(chName);
-    if (chProp) {
-      db.prepare('DELETE FROM meter_readings WHERE property_id = ?').run(chProp.id);
-      try { db.prepare('DELETE FROM utility_alerts WHERE property_id = ?').run(chProp.id); } catch(e) {}
-      try { db.prepare('DELETE FROM fair_usage_limits WHERE property_id = ?').run(chProp.id); } catch(e) {}
-      try { db.prepare('DELETE FROM compliance_certificates WHERE property_id = ?').run(chProp.id); } catch(e) {}
-      try { db.prepare('DELETE FROM documents WHERE property_id = ?').run(chProp.id); } catch(e) {}
-      try { db.prepare('DELETE FROM property_budgets WHERE property_id = ?').run(chProp.id); } catch(e) {}
-      db.prepare('DELETE FROM properties WHERE id = ?').run(chProp.id);
-      console.log(`  Removed Church Hill property: ${chName}`);
-    }
   }
 
   const ffrIds = {};
