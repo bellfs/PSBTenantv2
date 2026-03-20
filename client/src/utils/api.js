@@ -152,4 +152,16 @@ export const api = {
   saveUtilityFairUsage: (data) => request('/utilities/fair-usage', { method: 'POST', body: JSON.stringify(data) }),
   checkUtilityOverusage: (month, year) => request('/utilities/check-overusage', { method: 'POST', body: JSON.stringify({ month, year }) }),
   getUtilityMeterRefs: () => request('/utilities/meter-refs'),
+
+  // Finance / Banking
+  getBankAccounts: () => request('/finance/accounts'),
+  addBankAccount: (data) => request('/finance/accounts', { method: 'POST', body: JSON.stringify(data) }),
+  updateBankAccount: (id, data) => request(`/finance/accounts/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteBankAccount: (id) => request(`/finance/accounts/${id}`, { method: 'DELETE' }),
+  syncBankAccount: (id) => request(`/finance/accounts/${id}/sync`, { method: 'POST' }),
+  getTransactions: (params = {}) => { const qs = new URLSearchParams(params).toString(); return request(`/finance/transactions?${qs}`); },
+  updateTransaction: (id, data) => request(`/finance/transactions/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  categoriseTransactions: (ids) => request('/finance/categorise', { method: 'POST', body: JSON.stringify({ transaction_ids: ids }) }),
+  getFinanceSummary: (params = {}) => { const qs = new URLSearchParams(params).toString(); return request(`/finance/summary?${qs}`); },
+  getFinanceCategories: () => request('/finance/categories'),
 };

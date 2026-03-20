@@ -18,6 +18,7 @@ import Utilities from './pages/Utilities';
 import CheckIns from './pages/CheckIns';
 import CheckOuts from './pages/CheckOuts';
 import InspectionDetail from './pages/InspectionDetail';
+import Finance from './pages/Finance';
 import Layout from './components/Layout';
 
 const AuthContext = createContext(null);
@@ -63,6 +64,7 @@ export default function App() {
             <Route path="check-ins/:id" element={<InspectionDetail />} />
             <Route path="check-outs" element={<CheckOuts />} />
             <Route path="check-outs/:id" element={<InspectionDetail />} />
+            <Route path="finance" element={<Finance />} />
             <Route path="settings" element={<Settings />} />
           </Route>
         </Routes>

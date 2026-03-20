@@ -349,6 +349,53 @@ async function initialiseDatabase() {
   db.exec('CREATE INDEX IF NOT EXISTS idx_inspection_items ON inspection_items(room_id)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_inspection_photos ON inspection_photos(inspection_id)');
 
+  // ===== FINANCE / BANKING TABLES =====
+  db.exec(`CREATE TABLE IF NOT EXISTS bank_accounts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    provider TEXT NOT NULL CHECK(provider IN ('starling', 'wise', 'pleo')),
+    account_name TEXT NOT NULL,
+    account_id TEXT,
+    currency TEXT DEFAULT 'GBP',
+    access_token TEXT,
+    refresh_token TEXT,
+    token_expires_at DATETIME,
+    last_sync_at DATETIME,
+    sync_enabled INTEGER DEFAULT 1,
+    balance REAL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  db.exec(`CREATE TABLE IF NOT EXISTS bank_transactions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    bank_account_id INTEGER NOT NULL,
+    external_id TEXT NOT NULL,
+    date DATE NOT NULL,
+    amount REAL NOT NULL,
+    currency TEXT DEFAULT 'GBP',
+    direction TEXT NOT NULL CHECK(direction IN ('IN', 'OUT')),
+    counterparty TEXT,
+    reference TEXT,
+    description TEXT,
+    category TEXT,
+    ai_category TEXT,
+    ai_confidence REAL,
+    property_id INTEGER,
+    issue_id INTEGER,
+    tagged_by TEXT,
+    notes TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (bank_account_id) REFERENCES bank_accounts(id),
+    FOREIGN KEY (property_id) REFERENCES properties(id),
+    FOREIGN KEY (issue_id) REFERENCES issues(id),
+    UNIQUE(bank_account_id, external_id)
+  )`);
+
+  db.exec('CREATE INDEX IF NOT EXISTS idx_bank_txn_account ON bank_transactions(bank_account_id)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_bank_txn_date ON bank_transactions(date)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_bank_txn_property ON bank_transactions(property_id)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_bank_txn_category ON bank_transactions(ai_category)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_bank_txn_direction ON bank_transactions(direction)');
+
   // Migrate meter_readings unique constraint if table already exists without property_name in unique
   // (safe to run - just adds the column to the unique constraint concept via the CREATE TABLE IF NOT EXISTS above)
 

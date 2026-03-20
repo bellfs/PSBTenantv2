@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../utils/api';
-import { AlertCircle, Clock, CheckCircle, AlertTriangle, Zap, TrendingUp, ShieldCheck, XCircle, ArrowUpRight, Activity, Timer, Bot, Flame, PoundSterling, Wallet, PieChart, CalendarRange, Image, MessageSquareWarning } from 'lucide-react';
+import { AlertCircle, Clock, CheckCircle, AlertTriangle, Zap, TrendingUp, ShieldCheck, XCircle, ArrowUpRight, Activity, Timer, Bot, Flame, PoundSterling, Wallet, PieChart, CalendarRange, Image, MessageSquareWarning, Landmark, TrendingDown } from 'lucide-react';
 
 function timeAgo(dateStr) {
   if (!dateStr) return '';
@@ -35,12 +35,14 @@ export default function Dashboard() {
   const [budgets, setBudgets] = useState(null);
   const [compliance, setCompliance] = useState(null);
   const [utilities, setUtilities] = useState(null);
+  const [finance, setFinance] = useState(null);
   useEffect(() => {
     api.getIssueStats().then(setStats);
     api.getSlaMetrics().then(setSla).catch(() => {});
     api.getBudgets().then(setBudgets).catch(() => {});
     api.getComplianceSummary().then(setCompliance).catch(() => {});
     api.getUtilityAnalytics(2025).then(setUtilities).catch(() => {});
+    api.getFinanceSummary({ months: 3 }).then(setFinance).catch(() => {});
   }, []);
   if (!stats) return <div style={{ padding: 40, textAlign: 'center' }}><div className="loading-spinner" style={{ margin: '0 auto' }} /></div>;
 
@@ -569,6 +571,91 @@ export default function Dashboard() {
                 </>
               );
             })()}
+          </div>
+        </div>
+      )}
+
+      {/* Finance Overview Widget */}
+      {finance && finance.accounts?.length > 0 && (
+        <div className="card" style={{ marginTop: 12 }}>
+          <div className="card-header" style={{ padding: '12px 16px' }}>
+            <h3 style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14 }}>
+              <Landmark size={15} style={{ color: '#7C3AED' }} />
+              Bank Spending (3 months)
+            </h3>
+            <Link to="/finance" className="btn btn-ghost btn-sm" style={{ fontSize: 12 }}>
+              View Details <ArrowUpRight size={12} />
+            </Link>
+          </div>
+          <div className="card-body" style={{ padding: '12px 16px' }}>
+            <div className="utility-summary-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 12 }}>
+              <div style={{
+                textAlign: 'center', padding: '14px 8px', borderRadius: 'var(--radius-md)',
+                background: 'rgba(248,113,113,0.06)', border: '1px solid rgba(248,113,113,0.1)'
+              }}>
+                <TrendingDown size={16} style={{ color: 'var(--danger)', marginBottom: 6 }} />
+                <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--danger)', letterSpacing: '-0.03em' }}>
+                  &pound;{(finance.totalSpend || 0).toFixed(0)}
+                </div>
+                <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 3, fontWeight: 500 }}>Total Out</div>
+              </div>
+              <div style={{
+                textAlign: 'center', padding: '14px 8px', borderRadius: 'var(--radius-md)',
+                background: 'rgba(52,211,153,0.06)', border: '1px solid rgba(52,211,153,0.1)'
+              }}>
+                <TrendingUp size={16} style={{ color: 'var(--success)', marginBottom: 6 }} />
+                <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--success)', letterSpacing: '-0.03em' }}>
+                  &pound;{(finance.totalIncome || 0).toFixed(0)}
+                </div>
+                <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 3, fontWeight: 500 }}>Total In</div>
+              </div>
+              <div style={{
+                textAlign: 'center', padding: '14px 8px', borderRadius: 'var(--radius-md)',
+                background: 'rgba(249,115,22,0.06)', border: '1px solid rgba(249,115,22,0.1)'
+              }}>
+                <PoundSterling size={16} style={{ color: '#f97316', marginBottom: 6 }} />
+                <div style={{ fontSize: 20, fontWeight: 800, color: '#f97316', letterSpacing: '-0.03em' }}>
+                  &pound;{(finance.maintenanceSpend || 0).toFixed(0)}
+                </div>
+                <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 3, fontWeight: 500 }}>Maintenance</div>
+              </div>
+              <div style={{
+                textAlign: 'center', padding: '14px 8px', borderRadius: 'var(--radius-md)',
+                background: 'rgba(124,58,237,0.06)', border: '1px solid rgba(124,58,237,0.1)'
+              }}>
+                <Landmark size={16} style={{ color: '#7C3AED', marginBottom: 6 }} />
+                <div style={{ fontSize: 20, fontWeight: 800, color: (finance.totalIncome - finance.totalSpend) >= 0 ? 'var(--success)' : 'var(--danger)', letterSpacing: '-0.03em' }}>
+                  &pound;{Math.abs((finance.totalIncome || 0) - (finance.totalSpend || 0)).toFixed(0)}
+                </div>
+                <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 3, fontWeight: 500 }}>
+                  {(finance.totalIncome - finance.totalSpend) >= 0 ? 'Net Positive' : 'Net Negative'}
+                </div>
+              </div>
+            </div>
+
+            {/* Top 5 categories */}
+            {finance.byCategory?.length > 0 && (
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 8 }}>Top Expense Categories</div>
+                {finance.byCategory.slice(0, 5).map((c, i) => {
+                  const maxVal = finance.byCategory[0]?.total || 1;
+                  const pct = (c.total / maxVal) * 100;
+                  return (
+                    <div key={c.category} style={{ marginBottom: i < 4 ? 8 : 0 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                        <span style={{ fontSize: 12, color: 'var(--text-primary)', fontWeight: 450, textTransform: 'capitalize' }}>
+                          {(c.category || 'uncategorised').replace(/_/g, ' ')}
+                        </span>
+                        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--danger)' }}>&pound;{c.total.toFixed(0)}</span>
+                      </div>
+                      <div style={{ height: 5, background: 'rgba(248,113,113,0.06)', borderRadius: 3, overflow: 'hidden' }}>
+                        <div style={{ height: '100%', width: `${pct}%`, background: 'linear-gradient(90deg, #f87171, #ef4444)', borderRadius: 3, transition: 'width 0.5s ease' }} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
       )}

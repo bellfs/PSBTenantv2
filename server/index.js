@@ -26,6 +26,7 @@ app.use('/api/copilot', require('./routes/copilot'));
 app.use('/api/compliance', require('./routes/compliance'));
 app.use('/api/utilities', require('./routes/utilities'));
 app.use('/api/inspections', require('./routes/inspections'));
+app.use('/api/finance', require('./routes/finance'));
 app.use('/api', require('./routes/api'));
 
 const clientBuild = path.join(__dirname, '..', 'client', 'dist');

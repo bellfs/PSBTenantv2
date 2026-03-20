@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../App';
-import { LayoutDashboard, AlertCircle, Building2, Users, Settings, LogOut, Wrench, BarChart3, Menu, X, HardHat, ShieldCheck, CalendarRange, Zap, Sparkles, ClipboardCheck, ClipboardList } from 'lucide-react';
+import { LayoutDashboard, AlertCircle, Building2, Users, Settings, LogOut, Wrench, BarChart3, Menu, X, HardHat, ShieldCheck, CalendarRange, Zap, Sparkles, ClipboardCheck, ClipboardList, Landmark } from 'lucide-react';
 import CopilotPanel from './CopilotPanel';
 
 // Page-contextual placeholder suggestions that rotate
@@ -65,6 +65,13 @@ const PAGE_SUGGESTIONS = {
     'Total deposit deductions so far?',
     'Any check-outs in progress?',
     'Which check-out had highest deductions?',
+  ],
+  '/finance': [
+    'How much did we spend this month?',
+    'What is our biggest expense category?',
+    'Show spending by property',
+    'Total maintenance spend this year?',
+    'Who do we pay the most?',
   ],
   '/settings': [
     'What LLM provider are we using?',
@@ -142,6 +149,7 @@ export default function Layout() {
       <NavLink to="/utilities" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}><Zap size={18} /> Utilities</NavLink>
       <NavLink to="/check-ins" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}><ClipboardCheck size={18} /> Check-In</NavLink>
       <NavLink to="/check-outs" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}><ClipboardList size={18} /> Check-Out</NavLink>
+      <NavLink to="/finance" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}><Landmark size={18} /> Finance</NavLink>
       {user?.role === 'admin' && <NavLink to="/settings" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}><Settings size={18} /> Settings</NavLink>}
     </>
   );
