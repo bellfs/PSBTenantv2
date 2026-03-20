@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../App';
 import { LayoutDashboard, AlertCircle, Building2, Users, Settings, LogOut, Wrench, BarChart3, Menu, X, HardHat, ShieldCheck, ChevronRight, CalendarRange, Zap } from 'lucide-react';
+import CopilotPanel from './CopilotPanel';
 
 export default function Layout() {
   const { user, logout } = useAuth();
@@ -136,6 +137,7 @@ export default function Layout() {
       </aside>
 
       <main className="main-content"><Outlet /></main>
+      <CopilotPanel />
     </div>
   );
 }

@@ -114,6 +114,9 @@ export const api = {
   getEmailSyncLog: () => request('/email/sync-log'),
   scanInboxForComplaints: () => request('/email/scan-inbox', { method: 'POST' }),
 
+  // Copilot
+  askCopilot: (question, history) => request('/copilot/ask', { method: 'POST', body: JSON.stringify({ question, history }) }),
+
   // Utilities
   getUtilityReadings: (params = {}) => { const qs = new URLSearchParams(params).toString(); return request(`/utilities/readings?${qs}`); },
   saveUtilityReading: (data) => request('/utilities/readings', { method: 'POST', body: JSON.stringify(data) }),
