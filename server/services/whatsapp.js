@@ -602,14 +602,24 @@ async function notifyStaff(tenantName, propertyName, issueTitle, issueId, issueU
     db.close();
     if (!phoneSetting?.value) return;
 
-    const phones = phoneSetting.value.split(',').map(p => p.trim()).filter(Boolean);
-    if (phones.length === 0) return;
+    const entries = phoneSetting.value.split(',').map(e => e.trim()).filter(Boolean);
+    if (entries.length === 0) return;
+
+    // Parse entries: "Name:+447..." or just "+447..."
+    const members = entries.map(e => {
+      const parts = e.split(':');
+      if (parts.length === 2) return { name: parts[0].trim(), phone: parts[1].trim() };
+      return { name: '', phone: e.trim() };
+    }).filter(m => m.phone);
+
+    if (members.length === 0) return;
 
     const preview = (messagePreview || '').slice(0, 100);
-    const msg = `New maintenance message from ${tenantName} at ${propertyName || 'Unknown property'}\n\nIssue: ${issueTitle}\nRef: ${issueUuid}\n\n"${preview}"\n\nView: https://maintenance.52oldelvet.com/issues/${issueId}`;
 
-    for (const phone of phones) {
-      sendWhatsAppMessage(phone, msg).catch(err => console.error('[Notify] Failed to notify', phone, err.message));
+    for (const member of members) {
+      const greeting = member.name ? `Hi ${member.name}, ` : '';
+      const msg = `${greeting}New maintenance message from ${tenantName} at ${propertyName || 'Unknown property'}\n\nIssue: ${issueTitle}\nRef: ${issueUuid}\n\n"${preview}"\n\nView: https://maintenance.52oldelvet.com/issues/${issueId}`;
+      sendWhatsAppMessage(member.phone, msg).catch(err => console.error('[Notify] Failed to notify', member.phone, err.message));
     }
   } catch (err) {
     console.error('[Notify] Staff notification error:', err.message);

@@ -19,6 +19,7 @@ export default function Settings() {
   const [emailLoading, setEmailLoading] = useState('');
   const [emailError, setEmailError] = useState('');
   const [testEmailStatus, setTestEmailStatus] = useState('');
+  const [newPhone, setNewPhone] = useState({ name: '', number: '' });
 
   // Check URL params for Gmail callback result
   useEffect(() => {
@@ -136,9 +137,108 @@ export default function Settings() {
           </div>
         </div>
         <div className="form-group" style={{marginTop:20}}>
-          <label className="form-label">Staff Notification Phone Numbers</label>
-          <p style={{fontSize:12,color:'var(--text-muted)',marginBottom:8}}>Comma-separated UK phone numbers (e.g. +447700900001, +447700900002). Staff will receive a WhatsApp message with issue details when a new tenant message arrives.</p>
-          <input className="form-input" value={settings.staff_notify_phones||''} onChange={e=>setSettings(s=>({...s,staff_notify_phones:e.target.value}))} placeholder="+447700900001, +447700900002"/>
+          <label className="form-label">Team WhatsApp Notifications</label>
+          <p style={{fontSize:12,color:'var(--text-muted)',marginBottom:8}}>Add team members who should receive WhatsApp notifications when new issues are reported or tenants send messages.</p>
+
+          {/* Current team members list */}
+          {(() => {
+            const raw = settings.staff_notify_phones || '';
+            const entries = raw.split(',').map(e => e.trim()).filter(Boolean);
+            // Parse entries: "Name:+447..." or just "+447..."
+            const members = entries.map(e => {
+              const parts = e.split(':');
+              if (parts.length === 2) return { name: parts[0].trim(), number: parts[1].trim() };
+              return { name: '', number: e.trim() };
+            });
+
+            return members.length > 0 ? (
+              <div style={{marginBottom:12}}>
+                {members.map((m, i) => (
+                  <div key={i} style={{
+                    display:'flex', alignItems:'center', gap:10, padding:'10px 14px',
+                    background:'rgba(99,102,241,0.04)', border:'1px solid rgba(99,102,241,0.1)',
+                    borderRadius:8, marginBottom:6
+                  }}>
+                    <div style={{
+                      width:32, height:32, borderRadius:'50%',
+                      background:'var(--gradient-accent)', display:'flex',
+                      alignItems:'center', justifyContent:'center',
+                      fontSize:13, fontWeight:600, color:'white', flexShrink:0
+                    }}>
+                      {m.name ? m.name.split(' ').map(n=>n[0]).join('').toUpperCase().slice(0,2) : '#'}
+                    </div>
+                    <div style={{flex:1, minWidth:0}}>
+                      <div style={{fontSize:13, fontWeight:500, color:'var(--text-primary)'}}>
+                        {m.name || 'Team Member'}
+                      </div>
+                      <div style={{fontSize:11, color:'var(--text-muted)'}}>{m.number}</div>
+                    </div>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      style={{color:'var(--danger)', padding:'4px 8px'}}
+                      onClick={() => {
+                        const updated = entries.filter((_, idx) => idx !== i).join(', ');
+                        setSettings(s => ({...s, staff_notify_phones: updated}));
+                      }}
+                      title="Remove"
+                    >
+                      <Trash2 size={14}/>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div style={{
+                padding:'16px', textAlign:'center', borderRadius:8,
+                border:'1px dashed rgba(255,255,255,0.08)', marginBottom:12,
+                color:'var(--text-muted)', fontSize:12
+              }}>
+                No team members added yet
+              </div>
+            );
+          })()}
+
+          {/* Add new member form */}
+          <div style={{
+            display:'flex', gap:8, alignItems:'flex-end', flexWrap:'wrap'
+          }}>
+            <div style={{flex:'1 1 120px', minWidth:120}}>
+              <label style={{fontSize:11, color:'var(--text-muted)', marginBottom:4, display:'block'}}>Name</label>
+              <input
+                className="form-input"
+                value={newPhone.name}
+                onChange={e => setNewPhone(p => ({...p, name: e.target.value}))}
+                placeholder="e.g. Fergus"
+                style={{fontSize:13}}
+              />
+            </div>
+            <div style={{flex:'1 1 160px', minWidth:160}}>
+              <label style={{fontSize:11, color:'var(--text-muted)', marginBottom:4, display:'block'}}>WhatsApp Number</label>
+              <input
+                className="form-input"
+                value={newPhone.number}
+                onChange={e => setNewPhone(p => ({...p, number: e.target.value}))}
+                placeholder="e.g. +447700900001"
+                style={{fontSize:13}}
+              />
+            </div>
+            <button
+              className="btn btn-primary btn-sm"
+              style={{height:38, padding:'0 16px', gap:6, whiteSpace:'nowrap'}}
+              onClick={() => {
+                const num = newPhone.number.trim();
+                if (!num) return;
+                const entry = newPhone.name.trim() ? `${newPhone.name.trim()}:${num}` : num;
+                const current = settings.staff_notify_phones || '';
+                const updated = current ? `${current}, ${entry}` : entry;
+                setSettings(s => ({...s, staff_notify_phones: updated}));
+                setNewPhone({ name: '', number: '' });
+              }}
+            >
+              <Plus size={14}/> Add
+            </button>
+          </div>
+          <p style={{fontSize:11, color:'var(--text-muted)', marginTop:6}}>Use international format with country code (e.g. +44 for UK). Remember to save after making changes.</p>
         </div>
         <button className="btn btn-primary" style={{marginTop:12}} onClick={saveSettings}><Save size={15}/> {saved ? 'Saved!' : 'Save'}</button>
 
