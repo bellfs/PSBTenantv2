@@ -363,6 +363,15 @@ async function initialiseDatabase() {
   // --- Seed tenants from spreadsheet data ---
   seedTenants(db);
 
+  // --- One-time reseed: clear old meter readings so seedMeterReadings() re-runs with FFR data ---
+  const reseedFlag = db.prepare("SELECT value FROM settings WHERE key = 'meter_reseed_v2'").get();
+  if (!reseedFlag) {
+    db.exec('DELETE FROM meter_readings');
+    db.exec('DELETE FROM utility_alerts');
+    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('meter_reseed_v2', '1')").run();
+    console.log('  Cleared meter readings for FFR Group reseed');
+  }
+
   // --- Remove Church Hill properties (not ours) ---
   for (const chName of ['Flat 1 Church Hill','Flat 2 Church Hill','Flat 3 Church Hill','Flat 4 Church Hill']) {
     const chProp = db.prepare('SELECT id FROM properties WHERE name = ?').get(chName);
