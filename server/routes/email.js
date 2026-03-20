@@ -94,13 +94,57 @@ router.post('/accounts/:id/sync', authenticate, requireAdmin, async (req, res) =
 
   try {
     let result;
-    if (account.provider === 'gmail') {
+    const creds = account.credentials ? JSON.parse(account.credentials) : {};
+    // Gmail accounts with host field are App Password (IMAP) accounts
+    if (account.provider === 'gmail' && creds.host) {
+      result = await emailSync.syncImapAccount(account);
+    } else if (account.provider === 'gmail') {
       result = await emailSync.syncGmailAccount(account);
     } else if (account.provider === 'imap') {
       result = await emailSync.syncImapAccount(account);
     }
     res.json(result);
   } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Connect Gmail via App Password (IMAP) - simplified setup for admin@52oldelvet.com
+router.post('/accounts/gmail-app', authenticate, requireAdmin, async (req, res) => {
+  const { email_address, app_password } = req.body;
+  if (!email_address || !app_password) {
+    return res.status(400).json({ error: 'Email address and app password are required' });
+  }
+
+  const config = { host: 'imap.gmail.com', port: 993, username: email_address, password: app_password };
+
+  try {
+    // Test connection first
+    await emailSync.testImapConnection(config);
+
+    const db = getDb();
+    try {
+      // Remove any existing account for this email to avoid duplicates
+      db.prepare('DELETE FROM email_accounts WHERE email_address = ?').run(email_address);
+      const credentials = JSON.stringify(config);
+      const result = db.prepare('INSERT INTO email_accounts (provider, email_address, credentials, sync_enabled) VALUES (?, ?, ?, 1)')
+        .run('gmail', email_address, credentials);
+      console.log(`[Gmail App] Connected: ${email_address}`);
+      res.json({ id: result.lastInsertRowid, email_address, provider: 'gmail' });
+    } finally { db.close(); }
+  } catch (e) {
+    console.error('[Gmail App] Connection test failed:', e.message);
+    res.status(400).json({ error: `Connection failed: ${e.message}. Make sure you're using a Google App Password (not your regular password) and IMAP is enabled in Gmail settings.` });
+  }
+});
+
+// Scan all connected inboxes for tenant complaints (triggered from Issues page)
+router.post('/scan-inbox', authenticate, async (req, res) => {
+  try {
+    const result = await emailSync.scanAllAccounts();
+    res.json(result);
+  } catch (e) {
+    console.error('[EmailScan] Error:', e.message);
     res.status(500).json({ error: e.message });
   }
 });

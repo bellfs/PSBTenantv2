@@ -494,6 +494,7 @@ tr:last-child td { border-bottom: none; }
 @keyframes pulse-glow { 0%, 100% { box-shadow: 0 0 15px rgba(99,102,241,0.1); } 50% { box-shadow: 0 0 25px rgba(99,102,241,0.2); } }
 
 .fade-in { animation: fadeIn 0.35s ease forwards; }
+.spin { animation: spin 0.7s linear infinite; }
 .loading-spinner {
   width: 28px;
   height: 28px;

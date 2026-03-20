@@ -15,6 +15,7 @@ export default function Settings() {
   // Email state
   const [emailAccounts, setEmailAccounts] = useState([]);
   const [syncLog, setSyncLog] = useState([]);
+  const [gmailForm, setGmailForm] = useState({ email_address: 'admin@52oldelvet.com', app_password: '' });
   const [imapForm, setImapForm] = useState({ email_address: '', host: 'imap.zoho.com', port: 993, username: '', password: '' });
   const [emailLoading, setEmailLoading] = useState('');
   const [emailError, setEmailError] = useState('');
@@ -51,14 +52,14 @@ export default function Settings() {
   };
 
   const connectGmail = async () => {
+    if (!gmailForm.email_address || !gmailForm.app_password) return;
     setEmailLoading('gmail'); setEmailError('');
     try {
-      const { url } = await api.getGmailAuthUrl();
-      window.location.href = url;
-    } catch (e) {
-      setEmailError(e.message);
-      setEmailLoading('');
-    }
+      await api.connectGmailApp(gmailForm);
+      setGmailForm(f => ({ ...f, app_password: '' }));
+      loadEmailAccounts();
+    } catch (e) { setEmailError(e.message); }
+    setEmailLoading('');
   };
 
   const connectImap = async () => {
@@ -301,13 +302,25 @@ export default function Settings() {
           )}
         </div>
 
-        {/* Connect Gmail */}
+        {/* Connect Gmail with App Password */}
         <div className="card" style={{marginBottom:16}}>
-          <div className="card-header"><h3><Mail size={16} style={{verticalAlign:'middle',marginRight:6}}/>Connect Gmail</h3></div>
+          <div className="card-header"><h3><Mail size={16} style={{verticalAlign:'middle',marginRight:6}}/>Connect Gmail (App Password)</h3></div>
           <div className="card-body">
-            <p style={{fontSize:13,color:'var(--text-secondary)',marginBottom:12}}>Connect your company Gmail account to automatically scan for tenant maintenance emails. Requires GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET environment variables on Railway.</p>
-            <button className="btn btn-primary" onClick={connectGmail} disabled={emailLoading==='gmail'}>
-              <Mail size={15}/> {emailLoading==='gmail' ? 'Connecting...' : 'Connect Gmail Account'}
+            <p style={{fontSize:13,color:'var(--text-secondary)',marginBottom:12}}>Connect your Gmail account using a Google App Password. The AI will scan the inbox for tenant complaints and automatically create issues.</p>
+            <div style={{background:'rgba(99,102,241,0.06)',border:'1px solid rgba(99,102,241,0.15)',borderRadius:8,padding:'12px 14px',marginBottom:14,fontSize:12,color:'var(--text-secondary)',lineHeight:1.5}}>
+              <strong style={{color:'var(--text-primary)'}}>Setup steps:</strong><br/>
+              1. Go to <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noreferrer" style={{color:'var(--accent-light)'}}>myaccount.google.com/apppasswords</a><br/>
+              2. Generate an App Password for "Mail"<br/>
+              3. Also ensure IMAP is enabled in Gmail Settings &gt; Forwarding and POP/IMAP
+            </div>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+              <div className="form-group"><label className="form-label">Gmail Address</label>
+                <input className="form-input" value={gmailForm.email_address} onChange={e=>setGmailForm(f=>({...f,email_address:e.target.value}))} placeholder="admin@52oldelvet.com"/></div>
+              <div className="form-group"><label className="form-label">Google App Password</label>
+                <input className="form-input" type="password" value={gmailForm.app_password} onChange={e=>setGmailForm(f=>({...f,app_password:e.target.value}))} placeholder="xxxx xxxx xxxx xxxx"/></div>
+            </div>
+            <button className="btn btn-primary" onClick={connectGmail} disabled={emailLoading==='gmail'} style={{marginTop:8}}>
+              <Mail size={15}/> {emailLoading==='gmail' ? 'Testing Connection...' : 'Connect Gmail'}
             </button>
           </div>
         </div>

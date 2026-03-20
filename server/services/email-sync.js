@@ -350,23 +350,60 @@ async function syncAllAccounts() {
     accounts = db.prepare('SELECT * FROM email_accounts WHERE sync_enabled = 1').all();
   } finally { db.close(); }
 
-  if (!accounts || accounts.length === 0) return;
+  if (!accounts || accounts.length === 0) return { accounts: 0, processed: 0, matched: 0, issues: 0, results: [] };
+
+  let totalProcessed = 0, totalMatched = 0, totalIssues = 0;
+  const results = [];
 
   for (const account of accounts) {
     try {
       let result;
-      if (account.provider === 'gmail') {
+      const creds = account.credentials ? JSON.parse(account.credentials) : {};
+      // Gmail accounts connected via App Password use IMAP, detect by checking for host field
+      if (account.provider === 'gmail' && creds.host) {
+        result = await syncImapAccount(account);
+      } else if (account.provider === 'gmail') {
         result = await syncGmailAccount(account);
       } else if (account.provider === 'imap') {
         result = await syncImapAccount(account);
       }
-      if (result && (result.processed > 0 || result.error)) {
-        console.log(`[EmailSync] ${account.provider}:${account.email_address} - processed:${result.processed} matched:${result.matched} issues:${result.issues}${result.error ? ' error:'+result.error : ''}`);
+      if (result) {
+        totalProcessed += result.processed || 0;
+        totalMatched += result.matched || 0;
+        totalIssues += result.issues || 0;
+        results.push({ account: account.email_address, provider: account.provider, ...result });
+        if (result.processed > 0 || result.error) {
+          console.log(`[EmailSync] ${account.provider}:${account.email_address} - processed:${result.processed} matched:${result.matched} issues:${result.issues}${result.error ? ' error:'+result.error : ''}`);
+        }
       }
     } catch (e) {
       console.error(`[EmailSync] Error syncing ${account.email_address}:`, e.message);
+      results.push({ account: account.email_address, provider: account.provider, error: e.message });
     }
   }
+
+  return { accounts: accounts.length, processed: totalProcessed, matched: totalMatched, issues: totalIssues, results };
+}
+
+// Detailed scan for UI - returns recent sync log entries after scanning
+async function scanAllAccountsDetailed() {
+  const scanResult = await syncAllAccounts();
+
+  // Get the most recent sync log entries created during this scan
+  const db = getDb();
+  try {
+    const recentLogs = db.prepare(`
+      SELECT l.*, t.name as tenant_name, t.flat_number, p.name as property_name,
+        i.uuid as issue_uuid, i.title as issue_title, i.status as issue_status, i.priority as issue_priority
+      FROM email_sync_log l
+      LEFT JOIN tenants t ON l.matched_tenant_id = t.id
+      LEFT JOIN issues i ON l.issue_id = i.id
+      LEFT JOIN properties p ON t.property_id = p.id
+      ORDER BY l.processed_at DESC
+      LIMIT 50
+    `).all();
+    return { ...scanResult, recentLogs };
+  } finally { db.close(); }
 }
 
 function startSyncScheduler() {
@@ -388,7 +425,7 @@ module.exports = {
   syncGmailAccount,
   testImapConnection,
   syncImapAccount,
-  syncAllAccounts,
+  syncAllAccounts: scanAllAccountsDetailed,
   startSyncScheduler,
   stopSyncScheduler,
 };
