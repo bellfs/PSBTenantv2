@@ -31,6 +31,7 @@ export default function IssueDetail() {
   const load = () => api.getIssue(id).then(d => {
     setData(d);
     setEf({ final_cost: d.issue.final_cost ?? '', final_notes: d.issue.final_notes || '', attended_by: d.issue.attended_by || '', resolution_notes: d.issue.resolution_notes || '', resolved_at: d.issue.resolved_at ? d.issue.resolved_at.slice(0,10) : '' });
+    if (d.savedReport && !report) setReport(d.savedReport);
   });
   useEffect(() => { load(); loadQuotes(); api.getContractors().then(setContractors).catch(() => {}); }, [id]);
   if (!data) return <div style={{padding:40,textAlign:'center'}}><div className="loading-spinner" style={{margin:'0 auto'}}/></div>;
@@ -49,6 +50,7 @@ export default function IssueDetail() {
 
   const downloadReport = async () => {
     if (!report) return;
+    try {
     const { default: jsPDF } = await import('jspdf');
     await import('jspdf-autotable');
 
@@ -75,11 +77,11 @@ export default function IssueDetail() {
     };
 
     const STATUS_CFG = {
-      open: { color: COLORS.accent, emoji: '\u25CF', label: 'OPEN' },
-      in_progress: { color: COLORS.warning, emoji: '\u25B6', label: 'IN PROGRESS' },
-      escalated: { color: COLORS.danger, emoji: '\u26A0', label: 'ESCALATED' },
-      resolved: { color: COLORS.success, emoji: '\u2714', label: 'RESOLVED' },
-      closed: { color: COLORS.muted, emoji: '\u2716', label: 'CLOSED' },
+      open: { color: COLORS.accent, emoji: 'o', label: 'OPEN' },
+      in_progress: { color: COLORS.warning, emoji: '>', label: 'IN PROGRESS' },
+      escalated: { color: COLORS.danger, emoji: '!', label: 'ESCALATED' },
+      resolved: { color: COLORS.success, emoji: '+', label: 'RESOLVED' },
+      closed: { color: COLORS.muted, emoji: 'x', label: 'CLOSED' },
     };
 
     const PRIORITY_CFG = {
@@ -94,7 +96,7 @@ export default function IssueDetail() {
         // Footer on current page
         doc.setFontSize(8);
         doc.setTextColor(...COLORS.muted);
-        doc.text(`PSB Properties  \u2022  Maintenance Report  \u2022  ${report.issue.uuid}`, pageW / 2, pageH - 10, { align: 'center' });
+        doc.text(`PSB Properties  |  Maintenance Report  |  ${report.issue.uuid}`, pageW / 2, pageH - 10, { align: 'center' });
         doc.addPage();
         y = 18;
       }
@@ -127,7 +129,7 @@ export default function IssueDetail() {
     doc.setTextColor(...COLORS.white);
     doc.setFontSize(14);
     doc.setFont('helvetica', 'bold');
-    doc.text('\u2692', margin + 3.2, 19.5);
+    doc.text('PSB', margin + 1.5, 19.5);
 
     // Title
     doc.setFontSize(18);
@@ -136,7 +138,7 @@ export default function IssueDetail() {
     doc.setFontSize(9);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(200, 200, 220);
-    doc.text(`PSB Properties  \u2022  Ref: ${report.issue.uuid}  \u2022  Generated ${new Date(report.generated_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}`, margin + 14, 23.5);
+    doc.text(`PSB Properties  |  Ref: ${report.issue.uuid}  |  Generated ${new Date(report.generated_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}`, margin + 14, 23.5);
 
     // Status & Priority badges in header
     const sc = STATUS_CFG[report.issue.status] || STATUS_CFG.open;
@@ -155,12 +157,12 @@ export default function IssueDetail() {
     doc.setFontSize(11);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(...COLORS.text);
-    doc.text('\u{1F4CB}  Issue Details', margin, y);
+    doc.text('>>  Issue Details', margin, y);
     y += 7;
 
     const detailRows = [
       ['Property', `${report.issue.property_name || 'Unknown'}${report.issue.property_address ? '  (' + report.issue.property_address + ')' : ''}`],
-      ['Tenant', `${report.issue.tenant_name || 'Unknown'}${report.issue.tenant_flat ? '  \u2022  ' + report.issue.tenant_flat : ''}`],
+      ['Tenant', `${report.issue.tenant_name || 'Unknown'}${report.issue.tenant_flat ? '  |  ' + report.issue.tenant_flat : ''}`],
       ['Reported', new Date(report.issue.created_at).toLocaleString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })],
     ];
     if (report.issue.escalated_at) detailRows.push(['Escalated', new Date(report.issue.escalated_at).toLocaleString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })]);
@@ -189,7 +191,7 @@ export default function IssueDetail() {
     doc.setFontSize(11);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(...COLORS.text);
-    doc.text('\u{1F4B7}  Cost Assessment', margin, y);
+    doc.text('GBP  Cost Assessment', margin, y);
     y += 5;
 
     drawRoundedRect(margin, y, contentW, 22, 3, COLORS.cardBg);
@@ -236,13 +238,13 @@ export default function IssueDetail() {
     doc.setFontSize(11);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(...COLORS.text);
-    doc.text('\u{1F916}  AI Analysis Report', margin, y);
+    doc.text('[AI]  AI Analysis Report', margin, y);
     y += 7;
 
     // Parse report into sections
     const reportText = report.report || '';
     const sectionHeaders = ['SUMMARY', 'DIAGNOSIS', 'ACTIONS TAKEN', 'RECOMMENDATIONS', 'COST ASSESSMENT'];
-    const sectionEmojis = { 'SUMMARY': '\u{1F4DD}', 'DIAGNOSIS': '\u{1F50D}', 'ACTIONS TAKEN': '\u2705', 'RECOMMENDATIONS': '\u{1F4A1}', 'COST ASSESSMENT': '\u{1F4B0}' };
+    const sectionEmojis = { 'SUMMARY': '>>', 'DIAGNOSIS': '>>', 'ACTIONS TAKEN': '+', 'RECOMMENDATIONS': '*', 'COST ASSESSMENT': 'GBP' };
     const sectionColors = { 'SUMMARY': COLORS.accent, 'DIAGNOSIS': [168, 85, 247], 'ACTIONS TAKEN': COLORS.success, 'RECOMMENDATIONS': COLORS.warning, 'COST ASSESSMENT': [34, 211, 238] };
 
     // Split report text into sections
@@ -289,7 +291,7 @@ export default function IssueDetail() {
       checkPageBreak(blockH + 4);
 
       const sColor = sectionColors[section.title] || COLORS.accent;
-      const sEmoji = sectionEmojis[section.title] || '\u25AA';
+      const sEmoji = sectionEmojis[section.title] || '-';
 
       // Section card background
       drawRoundedRect(margin, y, contentW, blockH, 3, [245, 246, 252]);
@@ -318,11 +320,11 @@ export default function IssueDetail() {
       doc.setFontSize(11);
       doc.setFont('helvetica', 'bold');
       doc.setTextColor(...COLORS.text);
-      doc.text(`\u{1F4AC}  Conversation Log (${data.messages.length} messages)`, margin, y);
+      doc.text(`>>  Conversation Log (${data.messages.length} messages)`, margin, y);
       y += 7;
 
       const msgRows = data.messages.map(m => {
-        const who = m.sender === 'tenant' ? `\u{1F464} ${report.issue.tenant_name}` : m.sender === 'bot' ? '\u{1F916} AI Assistant' : `\u{1F477} ${m.sender}`;
+        const who = m.sender === 'tenant' ? `${report.issue.tenant_name}` : m.sender === 'bot' ? '[AI] Assistant' : `[Staff] ${m.sender}`;
         const time = new Date(m.created_at).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
         return [who, (m.content || '[media]').slice(0, 200), time];
       });
@@ -351,9 +353,12 @@ export default function IssueDetail() {
         didParseCell: (hookData) => {
           if (hookData.section === 'body' && hookData.column.index === 0) {
             const text = hookData.cell.raw || '';
-            if (text.includes('\u{1F464}')) hookData.cell.styles.fillColor = senderColors.tenant;
-            else if (text.includes('\u{1F916}')) hookData.cell.styles.fillColor = senderColors.bot;
-            else if (text.includes('\u{1F477}')) hookData.cell.styles.fillColor = senderColors.staff;
+            if (hookData.row.index < data.messages.length) {
+              const sender = data.messages[hookData.row.index]?.sender;
+              if (sender === 'tenant') hookData.cell.styles.fillColor = senderColors.tenant;
+              else if (sender === 'bot') hookData.cell.styles.fillColor = senderColors.bot;
+              else hookData.cell.styles.fillColor = senderColors.staff;
+            }
           }
         },
       });
@@ -367,7 +372,7 @@ export default function IssueDetail() {
       doc.setFontSize(11);
       doc.setFont('helvetica', 'bold');
       doc.setTextColor(...COLORS.text);
-      doc.text(`\u{1F4F7}  Attached Photos (${report.attachments.length})`, margin, y);
+      doc.text(`>>  Attached Photos (${report.attachments.length})`, margin, y);
       y += 7;
 
       for (const att of report.attachments) {
@@ -400,14 +405,14 @@ export default function IssueDetail() {
             let analysis = att.ai_analysis;
             try {
               const parsed = JSON.parse(analysis.replace(/```json\n?/g, '').replace(/```\n?/g, ''));
-              analysis = `Issue: ${parsed.likely_issue || 'Unknown'}\nSeverity: ${parsed.severity || 'Unknown'}\nCategory: ${parsed.category || 'Unknown'}${parsed.safety_concern ? '\n\u26A0 Safety Concern Identified' : ''}`;
+              analysis = `Issue: ${parsed.likely_issue || 'Unknown'}\nSeverity: ${parsed.severity || 'Unknown'}\nCategory: ${parsed.category || 'Unknown'}${parsed.safety_concern ? '\n! Safety Concern Identified' : ''}`;
             } catch (e) {
               analysis = (typeof analysis === 'string' ? analysis : '').slice(0, 200);
             }
             doc.setFontSize(8);
             doc.setFont('helvetica', 'bold');
             doc.setTextColor(...COLORS.accent);
-            doc.text('\u{1F916} AI Photo Analysis', margin + 62, y + 8);
+            doc.text('[AI] Photo Analysis', margin + 62, y + 8);
             doc.setFont('helvetica', 'normal');
             doc.setTextColor(...COLORS.text);
             const analysisLines = doc.splitTextToSize(analysis, contentW - 68);
@@ -424,7 +429,7 @@ export default function IssueDetail() {
     // ========= FOOTER ON LAST PAGE =========
     doc.setFontSize(7);
     doc.setTextColor(...COLORS.muted);
-    doc.text(`PSB Properties  \u2022  Maintenance Report  \u2022  ${report.issue.uuid}  \u2022  Page ${doc.internal.getCurrentPageInfo().pageNumber}`, pageW / 2, pageH - 10, { align: 'center' });
+    doc.text(`PSB Properties  |  Maintenance Report  |  ${report.issue.uuid}  |  Page ${doc.internal.getCurrentPageInfo().pageNumber}`, pageW / 2, pageH - 10, { align: 'center' });
 
     // Add page numbers to all pages
     const totalPages = doc.internal.getNumberOfPages();
@@ -436,6 +441,10 @@ export default function IssueDetail() {
     }
 
     doc.save(`PSB-Report-${report.issue.uuid}.pdf`);
+    } catch (err) {
+      console.error('[PDF] Error generating PDF:', err);
+      alert('Failed to generate PDF. Please try again.');
+    }
   };
 
   const addNote = async () => {

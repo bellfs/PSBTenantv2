@@ -90,7 +90,15 @@ router.get('/:id', authenticate, (req, res) => {
       WHERE i.property_id = ? AND i.id != ? AND i.category = ? AND i.category IS NOT NULL
       ORDER BY i.created_at DESC LIMIT 5
     `).all(issue.property_id, issue.id, issue.category);
-    res.json({ issue, messages, attachments, activity, staff, notes, similar });
+    // Include persisted AI report if available
+    const savedReport = issue.ai_report ? {
+      report: issue.ai_report,
+      issue,
+      attachments: attachments.map(a => ({ id: a.id, file_path: a.file_path, file_type: a.file_type, ai_analysis: a.ai_analysis })),
+      messages_count: messages.length,
+      generated_at: issue.ai_report_generated_at
+    } : null;
+    res.json({ issue, messages, attachments, activity, staff, notes, similar, savedReport });
   } finally { db.close(); }
 });
 

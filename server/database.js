@@ -210,6 +210,8 @@ async function initialiseDatabase() {
     ['tenants','tenancy_start','ALTER TABLE tenants ADD COLUMN tenancy_start DATE'],
     ['tenants','tenancy_end','ALTER TABLE tenants ADD COLUMN tenancy_end DATE'],
     ['tenants','active','ALTER TABLE tenants ADD COLUMN active INTEGER DEFAULT 1'],
+    ['issues','ai_report','ALTER TABLE issues ADD COLUMN ai_report TEXT'],
+    ['issues','ai_report_generated_at','ALTER TABLE issues ADD COLUMN ai_report_generated_at DATETIME'],
   ];
   for (const [t,c,s] of cols) {
     try { db.prepare(`SELECT ${c} FROM ${t} LIMIT 0`).all(); } catch(e) {

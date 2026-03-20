@@ -499,12 +499,18 @@ Keep it professional but concise. No markdown formatting. Use plain text.`;
 
     const report = await callLLM([{ role: 'user', content: reportPrompt }], { maxTokens: 1500 });
 
+    // Persist report to database
+    const generatedAt = new Date().toISOString();
+    try {
+      db.prepare('UPDATE issues SET ai_report = ?, ai_report_generated_at = ? WHERE id = ?').run(report, generatedAt, req.params.id);
+    } catch (e) { console.error('[Report] Failed to save report to DB:', e.message); }
+
     res.json({
       report,
       issue,
       attachments: attachments.map(a => ({ id: a.id, file_path: a.file_path, file_type: a.file_type, ai_analysis: a.ai_analysis })),
       messages_count: messages.length,
-      generated_at: new Date().toISOString()
+      generated_at: generatedAt
     });
   } catch (err) {
     console.error('[Report] Error:', err.message);
