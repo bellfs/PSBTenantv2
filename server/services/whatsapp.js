@@ -188,6 +188,9 @@ async function processIncomingMessage(webhookData) {
 
     const lowerText = textContent.toLowerCase().trim();
 
+    // Detect small talk / niceties that should NOT create a new issue
+    const isSmallTalk = !imageData && lowerText.match(/^(thanks|thank you|cheers|ta|thx|thank u|nice one|brilliant|great|perfect|lovely|cool|awesome|fab|amazing|good one|sweet|wicked|class|mint|sound|safe|legend|brill|no worries|no problem|np|all good|sorted|how are you|how r u|hows it going|how's it going|whats up|what's up|hey|hi|hello|hiya|yo|morning|good morning|afternoon|evening|good evening|goodnight|night|haha|lol|lmao|😂|👍|🙏|❤️|okay|ok|sure|right|fair enough|got it|understood|will do|nice|good|great thanks|thanks mate|cheers mate|thanks a lot|thank you so much|much appreciated|appreciate it)$/);
+
     // Only match EXPLICIT new issue phrases (not casual affirmations)
     const explicitNewIssue = lowerText.match(/\b(new issue|new problem|different issue|another problem|something else|report something new)\b/);
 
@@ -212,12 +215,30 @@ async function processIncomingMessage(webhookData) {
 
     // Handle "anything else?" responses
     if (justCompleted && !activeIssue && askedAnythingElse) {
-      if (wantsNothing) {
+      if (wantsNothing || isSmallTalk) {
         await sendWhatsAppMessage(from, `No problem! Glad I could help. Just message me any time if something comes up. 👍`);
         return;
       }
       // They want to report something new - fall through to create new issue
       activeIssue = null;
+    }
+
+    // Handle small talk when there's NO active issue — respond pleasantly without creating an issue
+    if (isSmallTalk && !activeIssue) {
+      const firstName = tenant.name?.split(' ')[0] || 'there';
+      const greetings = lowerText.match(/^(hey|hi|hello|hiya|yo|morning|good morning|afternoon|evening|good evening)$/);
+      const howAreYou = lowerText.match(/^(how are you|how r u|hows it going|how's it going|whats up|what's up)$/);
+
+      let response;
+      if (greetings) {
+        response = `Hey ${firstName}! 👋 Good to hear from you. Got a maintenance issue I can help with, or just checking in?`;
+      } else if (howAreYou) {
+        response = `All good here thanks ${firstName}! Ready and waiting to help if anything needs sorting in your flat. What can I do for you? 🔧`;
+      } else {
+        response = `You're welcome ${firstName}! If anything comes up around the flat, just drop me a message any time. 👍`;
+      }
+      await sendWhatsAppMessage(from, response);
+      return;
     }
 
     // ============================================================
