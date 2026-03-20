@@ -8,16 +8,16 @@ import CopilotPanel from './CopilotPanel';
 const PAGE_SUGGESTIONS = {
   '/': [
     'How many open issues do we have?',
-    'What's the total spend this month?',
+    'Total spend this month?',
     'Which property has the most issues?',
     'Are any compliance certs expiring?',
     'Show me overdue issues',
   ],
   '/issues': [
     'Which issues are escalated?',
-    'What's the most common issue category?',
+    'Most common issue category?',
     'List urgent issues',
-    'How many issues were resolved this week?',
+    'How many issues resolved this week?',
     'Any issues open more than 48 hours?',
   ],
   '/properties': [
@@ -28,21 +28,21 @@ const PAGE_SUGGESTIONS = {
   ],
   '/tenants': [
     'Which tenant has the most complaints?',
-    'What flat is [tenant name] in?',
+    'What flat is a tenant in?',
     'How many tenants do we have?',
     'List tenants at Claypath',
   ],
   '/contractors': [
     'Who is our plumber?',
-    'What's Tony Finnan's number?',
+    'Show Tony Finnan contact details',
     'List all active contractors',
     'Which contractor has the most quotes?',
   ],
   '/analytics': [
-    'What's the average resolution time?',
+    'Average resolution time?',
     'How much have we spent this year?',
     'Break down costs by category',
-    'What percentage of issues does AI resolve?',
+    'What percentage does AI resolve?',
   ],
   '/utilities': [
     'Which property uses the most gas?',
@@ -62,9 +62,9 @@ const PAGE_SUGGESTIONS = {
     'Show recent check-in inspections',
   ],
   '/check-outs': [
-    'What are the total deposit deductions?',
+    'Total deposit deductions so far?',
     'Any check-outs in progress?',
-    'Which check-out had the highest deductions?',
+    'Which check-out had highest deductions?',
   ],
   '/settings': [
     'What LLM provider are we using?',
