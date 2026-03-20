@@ -176,7 +176,7 @@ router.put('/:id', authenticate, (req, res) => {
     const inspection = db.prepare('SELECT * FROM inspections WHERE id = ?').get(req.params.id);
     if (!inspection) return res.status(404).json({ error: 'Not found' });
 
-    const { status, notes, meter_gas, meter_electric, meter_water, key_count, key_notes, deposit_amount, tenant_id, flat_number } = req.body;
+    const { status, notes, meter_gas, meter_electric, meter_water, key_count, key_notes, deposit_amount, tenant_id, flat_number, deposit_scheme, deposit_ref, cleaning_standard } = req.body;
     db.prepare(`
       UPDATE inspections SET
         status = COALESCE(?, status),
@@ -189,9 +189,19 @@ router.put('/:id', authenticate, (req, res) => {
         deposit_amount = COALESCE(?, deposit_amount),
         tenant_id = COALESCE(?, tenant_id),
         flat_number = COALESCE(?, flat_number),
+        deposit_scheme = COALESCE(?, deposit_scheme),
+        deposit_ref = COALESCE(?, deposit_ref),
+        cleaning_standard = COALESCE(?, cleaning_standard),
         updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
-    `).run(status || null, notes || null, meter_gas || null, meter_electric || null, meter_water || null, key_count || null, key_notes || null, deposit_amount || null, tenant_id || null, flat_number || null, req.params.id);
+    `).run(status || null, notes || null, meter_gas || null, meter_electric || null, meter_water || null, key_count || null, key_notes || null, deposit_amount || null, tenant_id || null, flat_number || null, deposit_scheme || null, deposit_ref || null, cleaning_standard || null, req.params.id);
+
+    // Recalculate deposit return if deposit_amount changed
+    if (deposit_amount !== undefined) {
+      const total = db.prepare('SELECT COALESCE(SUM(cost), 0) as total FROM inspection_deductions WHERE inspection_id = ?').get(req.params.id).total;
+      const depositReturn = Math.max(0, (parseFloat(deposit_amount) || 0) - total);
+      db.prepare('UPDATE inspections SET total_deductions = ?, deposit_return = ? WHERE id = ?').run(total, depositReturn, req.params.id);
+    }
 
     res.json({ success: true });
   } finally { db.close(); }
@@ -294,11 +304,20 @@ router.post('/:id/sign', authenticate, (req, res) => {
 router.post('/:id/deductions', authenticate, (req, res) => {
   const db = getDb();
   try {
-    const { item_id, description, category, cost, evidence_notes } = req.body;
+    const { item_id, description, category, cost, evidence_notes, item_age_years, item_lifespan_years, replacement_cost } = req.body;
+
+    // Calculate apportioned cost using betterment principle
+    let apportionedCost = cost || 0;
+    if (item_age_years != null && item_lifespan_years && replacement_cost) {
+      const remainingLife = Math.max(0, item_lifespan_years - item_age_years);
+      const proportion = remainingLife / item_lifespan_years;
+      apportionedCost = Math.round(replacement_cost * proportion * 100) / 100;
+    }
+
     const result = db.prepare(`
-      INSERT INTO inspection_deductions (inspection_id, item_id, description, category, cost, evidence_notes)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(req.params.id, item_id || null, description, category || 'damage', cost || 0, evidence_notes || null);
+      INSERT INTO inspection_deductions (inspection_id, item_id, description, category, cost, evidence_notes, item_age_years, item_lifespan_years, replacement_cost, apportioned_cost)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(req.params.id, item_id || null, description, category || 'damage', apportionedCost, evidence_notes || null, item_age_years || null, item_lifespan_years || null, replacement_cost || null, apportionedCost);
 
     // Recalculate total deductions
     const total = db.prepare('SELECT COALESCE(SUM(cost), 0) as total FROM inspection_deductions WHERE inspection_id = ?').get(req.params.id).total;
@@ -474,6 +493,8 @@ function buildReportHTML(inspection, rooms, deductions, photos) {
       <div class="meta-row"><span class="label">Date</span><span class="value">${new Date(inspection.inspection_date).toLocaleDateString('en-GB')}</span></div>
       <div class="meta-row"><span class="label">Inspector</span><span class="value">${inspection.performed_by || ''}</span></div>
       <div class="meta-row"><span class="label">Tenant</span><span class="value">${inspection.tenant_name || 'N/A'}</span></div>
+      ${isCheckOut && inspection.deposit_scheme ? `<div class="meta-row"><span class="label">Deposit Scheme</span><span class="value">${inspection.deposit_scheme}</span></div>` : ''}
+      ${isCheckOut && inspection.deposit_ref ? `<div class="meta-row"><span class="label">Scheme Ref</span><span class="value">${inspection.deposit_ref}</span></div>` : ''}
     </div>
   </div>
 
@@ -538,21 +559,25 @@ function buildReportHTML(inspection, rooms, deductions, photos) {
     html += `
   <div class="deductions-section">
     <h3>Deposit Deductions</h3>
+    <p style="font-size:11px;color:#64748b;margin-bottom:12px;">Deductions calculated in accordance with the betterment principle. Tenants are only charged for the remaining useful life of items, not full replacement cost.</p>
     <table class="ded-table">
       <thead><tr>
         <th>Item</th>
         <th>Description</th>
         <th>Category</th>
+        <th>Apportionment</th>
         <th style="text-align:right">Cost</th>
       </tr></thead>
       <tbody>`;
 
     for (const d of deductions) {
+      const hasApportionment = d.item_age_years != null && d.item_lifespan_years;
       html += `
         <tr>
           <td>${d.room_name ? `${d.room_name} - ${d.item_name}` : (d.item_name || 'General')}</td>
           <td>${d.description}</td>
-          <td>${d.category}</td>
+          <td style="text-transform:capitalize">${(d.category || '').replace(/_/g, ' ')}</td>
+          <td style="font-size:10px;color:#64748b;">${hasApportionment ? `${d.item_age_years}yr old / ${d.item_lifespan_years}yr life &bull; £${(d.replacement_cost || 0).toFixed(0)} replacement` : '-'}</td>
           <td style="text-align:right;font-weight:600">&pound;${d.cost.toFixed(2)}</td>
         </tr>`;
     }
@@ -587,9 +612,11 @@ function buildReportHTML(inspection, rooms, deductions, photos) {
   ${inspection.notes ? `<div class="meta-box" style="margin-top:16px;"><h3>Additional Notes</h3><p style="font-size:12px;padding:4px 0;">${inspection.notes}</p></div>` : ''}
 
   <div class="footer">
-    <p>PSB Properties &mdash; ${title}</p>
+    <p><strong>PSB Properties</strong> &mdash; ${title}</p>
     <p>Generated ${new Date().toLocaleString('en-GB')} | Reference: INS-${String(inspection.id).padStart(4, '0')}</p>
-    <p>This report is provided as evidence for deposit protection scheme adjudication.</p>
+    ${isCheckOut && inspection.deposit_scheme ? `<p>Deposit protected with: ${inspection.deposit_scheme}${inspection.deposit_ref ? ` (Ref: ${inspection.deposit_ref})` : ''}</p>` : ''}
+    <p>This report is provided as evidence for deposit protection scheme adjudication in accordance with the Housing Act 2004.</p>
+    <p>All deductions are calculated using the betterment principle. Fair wear and tear has been considered.</p>
   </div>
 </div>
 </body>

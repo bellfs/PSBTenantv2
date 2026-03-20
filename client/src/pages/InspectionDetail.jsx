@@ -17,7 +17,7 @@ export default function InspectionDetail() {
   const [showAddRoom, setShowAddRoom] = useState(false);
   const [newRoomName, setNewRoomName] = useState('');
   const [showAddDeduction, setShowAddDeduction] = useState(false);
-  const [deductionForm, setDeductionForm] = useState({ description: '', cost: '', category: 'damage', item_id: '' });
+  const [deductionForm, setDeductionForm] = useState({ description: '', cost: '', category: 'damage', item_id: '', item_age_years: '', item_lifespan_years: '', replacement_cost: '' });
   const [showReport, setShowReport] = useState(false);
   const [reportHtml, setReportHtml] = useState('');
 
@@ -71,8 +71,14 @@ export default function InspectionDetail() {
 
   const handleAddDeduction = async () => {
     if (!deductionForm.description || !deductionForm.cost) return;
-    await api.addDeduction(id, { ...deductionForm, cost: parseFloat(deductionForm.cost) });
-    setDeductionForm({ description: '', cost: '', category: 'damage', item_id: '' });
+    await api.addDeduction(id, {
+      ...deductionForm,
+      cost: parseFloat(deductionForm.cost),
+      item_age_years: deductionForm.item_age_years ? parseFloat(deductionForm.item_age_years) : null,
+      item_lifespan_years: deductionForm.item_lifespan_years ? parseFloat(deductionForm.item_lifespan_years) : null,
+      replacement_cost: deductionForm.replacement_cost ? parseFloat(deductionForm.replacement_cost) : null,
+    });
+    setDeductionForm({ description: '', cost: '', category: 'damage', item_id: '', item_age_years: '', item_lifespan_years: '', replacement_cost: '' });
     setShowAddDeduction(false);
     load();
   };
@@ -364,16 +370,22 @@ export default function InspectionDetail() {
                   )}
                 </div>
                 <div className="card-body">
-                  <div className="form-group" style={{ margin: 0, marginBottom: 12 }}>
+                  <div className="form-group" style={{ margin: 0, marginBottom: 8 }}>
                     <label className="form-label">Deposit Amount (£)</label>
-                    <input
-                      className="form-input"
-                      type="number"
-                      step="0.01"
-                      defaultValue={inspection.deposit_amount || ''}
-                      onBlur={e => handleUpdateInspection({ deposit_amount: parseFloat(e.target.value) || 0 })}
-                      disabled={isCompleted}
-                    />
+                    <input className="form-input" type="number" step="0.01" defaultValue={inspection.deposit_amount || ''} onBlur={e => handleUpdateInspection({ deposit_amount: parseFloat(e.target.value) || 0 })} disabled={isCompleted} />
+                  </div>
+                  <div className="form-group" style={{ margin: 0, marginBottom: 8 }}>
+                    <label className="form-label">Protection Scheme</label>
+                    <select className="form-select" defaultValue={inspection.deposit_scheme || ''} onChange={e => handleUpdateInspection({ deposit_scheme: e.target.value })} disabled={isCompleted}>
+                      <option value="">Select scheme...</option>
+                      <option value="DPS">DPS (Deposit Protection Service)</option>
+                      <option value="TDS">TDS (Tenancy Deposit Scheme)</option>
+                      <option value="mydeposits">mydeposits</option>
+                    </select>
+                  </div>
+                  <div className="form-group" style={{ margin: 0, marginBottom: 12 }}>
+                    <label className="form-label">Deposit Reference</label>
+                    <input className="form-input" placeholder="Scheme reference number" defaultValue={inspection.deposit_ref || ''} onBlur={e => handleUpdateInspection({ deposit_ref: e.target.value })} disabled={isCompleted} />
                   </div>
 
                   {deductions.length > 0 && (
@@ -472,9 +484,52 @@ export default function InspectionDetail() {
                 <option value="missing_item">Missing Item</option>
                 <option value="repair">Repair</option>
                 <option value="redecoration">Redecoration</option>
+                <option value="key_replacement">Key Replacement</option>
                 <option value="other">Other</option>
               </select>
             </div>
+
+            {/* Betterment / Apportionment Calculator */}
+            <div style={{ background: 'rgba(99,102,241,0.06)', border: '1px solid rgba(99,102,241,0.15)', borderRadius: 'var(--radius-md)', padding: 12, marginTop: 4 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent-light)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                Betterment Calculator (optional)
+              </div>
+              <p style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 10 }}>
+                UK deposit schemes require fair apportionment — tenants pay only for remaining useful life lost, not full replacement.
+              </p>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label" style={{ fontSize: 10 }}>Item Age (years)</label>
+                  <input className="form-input" type="number" step="0.5" placeholder="e.g. 3" value={deductionForm.item_age_years} onChange={e => setDeductionForm({ ...deductionForm, item_age_years: e.target.value })} />
+                </div>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label" style={{ fontSize: 10 }}>Expected Lifespan</label>
+                  <input className="form-input" type="number" step="0.5" placeholder="e.g. 10" value={deductionForm.item_lifespan_years} onChange={e => setDeductionForm({ ...deductionForm, item_lifespan_years: e.target.value })} />
+                </div>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label" style={{ fontSize: 10 }}>Replacement Cost (£)</label>
+                  <input className="form-input" type="number" step="0.01" placeholder="e.g. 500" value={deductionForm.replacement_cost} onChange={e => setDeductionForm({ ...deductionForm, replacement_cost: e.target.value })} />
+                </div>
+              </div>
+              {deductionForm.item_age_years && deductionForm.item_lifespan_years && deductionForm.replacement_cost && (() => {
+                const age = parseFloat(deductionForm.item_age_years);
+                const life = parseFloat(deductionForm.item_lifespan_years);
+                const cost = parseFloat(deductionForm.replacement_cost);
+                if (life <= 0) return null;
+                const remaining = Math.max(0, life - age);
+                const proportion = remaining / life;
+                const apportioned = Math.round(cost * proportion * 100) / 100;
+                return (
+                  <div style={{ marginTop: 8, padding: '8px 10px', background: 'rgba(52,211,153,0.08)', borderRadius: 6, fontSize: 12 }}>
+                    <strong>Apportioned amount: £{apportioned.toFixed(2)}</strong>
+                    <span style={{ color: 'var(--text-muted)', marginLeft: 8 }}>
+                      ({remaining.toFixed(1)}yr remaining / {life}yr lifespan × £{cost.toFixed(2)})
+                    </span>
+                  </div>
+                );
+              })()}
+            </div>
+
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16 }}>
               <button className="btn btn-secondary" onClick={() => setShowAddDeduction(false)}>Cancel</button>
               <button className="btn btn-primary" onClick={handleAddDeduction}>Add Deduction</button>

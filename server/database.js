@@ -371,6 +371,17 @@ async function initialiseDatabase() {
     ['issues','ai_report_generated_at','ALTER TABLE issues ADD COLUMN ai_report_generated_at DATETIME'],
     ['utility_rates','property_id','ALTER TABLE utility_rates ADD COLUMN property_id INTEGER'],
     ['utility_rates','property_name','ALTER TABLE utility_rates ADD COLUMN property_name TEXT'],
+    ['inspection_items','cleanliness','ALTER TABLE inspection_items ADD COLUMN cleanliness TEXT DEFAULT \'acceptable\''],
+    ['inspection_items','checkin_cleanliness','ALTER TABLE inspection_items ADD COLUMN checkin_cleanliness TEXT'],
+    ['inspection_rooms','cleanliness','ALTER TABLE inspection_rooms ADD COLUMN cleanliness TEXT DEFAULT \'acceptable\''],
+    ['inspection_deductions','item_age_years','ALTER TABLE inspection_deductions ADD COLUMN item_age_years REAL'],
+    ['inspection_deductions','item_lifespan_years','ALTER TABLE inspection_deductions ADD COLUMN item_lifespan_years REAL'],
+    ['inspection_deductions','replacement_cost','ALTER TABLE inspection_deductions ADD COLUMN replacement_cost REAL'],
+    ['inspection_deductions','apportioned_cost','ALTER TABLE inspection_deductions ADD COLUMN apportioned_cost REAL'],
+    ['inspections','deposit_scheme','ALTER TABLE inspections ADD COLUMN deposit_scheme TEXT'],
+    ['inspections','deposit_ref','ALTER TABLE inspections ADD COLUMN deposit_ref TEXT'],
+    ['inspections','tenancy_clause','ALTER TABLE inspections ADD COLUMN tenancy_clause TEXT'],
+    ['inspections','cleaning_standard','ALTER TABLE inspections ADD COLUMN cleaning_standard TEXT'],
   ];
   for (const [t,c,s] of cols) {
     try { db.prepare(`SELECT ${c} FROM ${t} LIMIT 0`).all(); } catch(e) {
