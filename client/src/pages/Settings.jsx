@@ -15,6 +15,7 @@ export default function Settings() {
   // Email state
   const [emailAccounts, setEmailAccounts] = useState([]);
   const [syncLog, setSyncLog] = useState([]);
+  const [imapForm, setImapForm] = useState({ email_address: 'info@psb.properties', host: 'imap.zoho.com', port: 993, username: 'info@psb.properties', password: '' });
   const [emailLoading, setEmailLoading] = useState('');
   const [emailError, setEmailError] = useState('');
   const [testEmailStatus, setTestEmailStatus] = useState('');
@@ -58,6 +59,17 @@ export default function Settings() {
       setEmailError(e.message);
       setEmailLoading('');
     }
+  };
+
+  const connectImap = async () => {
+    if (!imapForm.email_address || !imapForm.username || !imapForm.password) return;
+    setEmailLoading('imap'); setEmailError('');
+    try {
+      await api.addImapAccount(imapForm);
+      setImapForm(f => ({ ...f, password: '' }));
+      loadEmailAccounts();
+    } catch (e) { setEmailError(e.message); }
+    setEmailLoading('');
   };
 
   const triggerSync = async (id) => {
@@ -303,6 +315,31 @@ export default function Settings() {
               <Mail size={15}/> {emailLoading==='gmail' ? 'Connecting...' : 'Connect Gmail Account'}
             </button>
             <p style={{fontSize:11,color:'var(--text-muted)',marginTop:8}}>You'll be redirected to Google to authorise read-only access to your inbox.</p>
+          </div>
+        </div>
+
+        {/* Connect IMAP (Zoho) */}
+        <div className="card" style={{marginBottom:16}}>
+          <div className="card-header"><h3><Mail size={16} style={{verticalAlign:'middle',marginRight:6}}/>Connect IMAP Account (Zoho Mail)</h3></div>
+          <div className="card-body">
+            <p style={{fontSize:13,color:'var(--text-secondary)',marginBottom:12}}>Connect info@psb.properties or any IMAP email account. Pre-configured for Zoho Mail. Use an App Password from Zoho for security.</p>
+            <div style={{background:'rgba(99,102,241,0.06)',border:'1px solid rgba(99,102,241,0.15)',borderRadius:8,padding:'12px 14px',marginBottom:14,fontSize:12,color:'var(--text-secondary)',lineHeight:1.5}}>
+              <strong style={{color:'var(--text-primary)'}}>Zoho App Password:</strong><br/>
+              Go to <a href="https://accounts.zoho.com/home#security/security_pwd" target="_blank" rel="noreferrer" style={{color:'var(--accent-light)'}}>Zoho Account Security</a> &rarr; App Passwords &rarr; Generate new password for "PSB Maintenance Hub"
+            </div>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+              <div className="form-group"><label className="form-label">Email Address</label>
+                <input className="form-input" value={imapForm.email_address} onChange={e=>setImapForm(f=>({...f,email_address:e.target.value}))} placeholder="info@psb.properties"/></div>
+              <div className="form-group"><label className="form-label">IMAP Host</label>
+                <input className="form-input" value={imapForm.host} onChange={e=>setImapForm(f=>({...f,host:e.target.value}))} placeholder="imap.zoho.com"/></div>
+              <div className="form-group"><label className="form-label">Username</label>
+                <input className="form-input" value={imapForm.username} onChange={e=>setImapForm(f=>({...f,username:e.target.value}))} placeholder="info@psb.properties"/></div>
+              <div className="form-group"><label className="form-label">Zoho App Password</label>
+                <input className="form-input" type="password" value={imapForm.password} onChange={e=>setImapForm(f=>({...f,password:e.target.value}))} placeholder="App-specific password from Zoho"/></div>
+            </div>
+            <button className="btn btn-primary" onClick={connectImap} disabled={emailLoading==='imap'} style={{marginTop:8}}>
+              <Mail size={15}/> {emailLoading==='imap' ? 'Testing Connection...' : 'Test & Connect'}
+            </button>
           </div>
         </div>
 

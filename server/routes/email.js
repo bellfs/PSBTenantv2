@@ -39,6 +39,32 @@ router.get('/accounts/gmail/callback', async (req, res) => {
   }
 });
 
+// Add IMAP account (Zoho, etc.)
+router.post('/accounts/imap', authenticate, requireAdmin, async (req, res) => {
+  const { email_address, host, port, username, password } = req.body;
+  if (!email_address || !host || !username || !password) {
+    return res.status(400).json({ error: 'email_address, host, username, and password are required' });
+  }
+
+  try {
+    // Test connection first
+    await emailSync.testImapConnection({ host, port: port || 993, username, password });
+
+    const db = getDb();
+    try {
+      // Remove existing account for same email to avoid duplicates
+      db.prepare('DELETE FROM email_accounts WHERE email_address = ?').run(email_address);
+      const credentials = JSON.stringify({ host, port: port || 993, username, password });
+      const result = db.prepare('INSERT INTO email_accounts (provider, email_address, credentials, sync_enabled) VALUES (?, ?, ?, 1)')
+        .run('imap', email_address, credentials);
+      console.log(`[IMAP] Connected: ${email_address} via ${host}`);
+      res.json({ id: result.lastInsertRowid, email_address, provider: 'imap' });
+    } finally { db.close(); }
+  } catch (e) {
+    res.status(400).json({ error: `Connection test failed: ${e.message}` });
+  }
+});
+
 // Toggle email account sync
 router.put('/accounts/:id', authenticate, requireAdmin, (req, res) => {
   const { sync_enabled } = req.body;
@@ -70,8 +96,13 @@ router.post('/accounts/:id/sync', authenticate, async (req, res) => {
   if (!account) return res.status(404).json({ error: 'Account not found' });
 
   try {
-    const result = await emailSync.syncGmailAccount(account);
-    res.json(result);
+    let result;
+    if (account.provider === 'gmail') {
+      result = await emailSync.syncGmailAccount(account);
+    } else if (account.provider === 'imap') {
+      result = await emailSync.syncImapAccount(account);
+    }
+    res.json(result || { error: 'Unknown provider' });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

@@ -169,6 +169,80 @@ function extractBodyText(payload) {
   return '';
 }
 
+// ===== IMAP (Zoho / Other) =====
+
+let ImapSimple = null;
+try {
+  ImapSimple = require('imap-simple');
+} catch (e) {
+  console.log('[EmailSync] imap-simple not installed - IMAP disabled');
+}
+
+async function testImapConnection(config) {
+  if (!ImapSimple) throw new Error('imap-simple package not installed');
+  const connection = await ImapSimple.connect({
+    imap: { host: config.host, port: config.port || 993, tls: true, user: config.username, password: config.password, authTimeout: 10000 }
+  });
+  await connection.end();
+  return true;
+}
+
+async function syncImapAccount(account) {
+  if (!ImapSimple) return { processed: 0, matched: 0, issues: 0, error: 'imap-simple not installed' };
+  const creds = JSON.parse(account.credentials);
+
+  try {
+    const connection = await ImapSimple.connect({
+      imap: { host: creds.host, port: creds.port || 993, tls: true, user: creds.username, password: creds.password, authTimeout: 15000 }
+    });
+
+    await connection.openBox('INBOX');
+
+    // Search for emails from last 7 days
+    const since = new Date(Date.now() - 7 * 86400000);
+    const searchCriteria = [['SINCE', since.toISOString().split('T')[0]]];
+    const fetchOptions = { bodies: ['HEADER', 'TEXT'], struct: true };
+
+    const messages = await connection.search(searchCriteria, fetchOptions);
+    let processed = 0, matched = 0, issuesCreated = 0;
+
+    for (const msg of messages) {
+      const msgId = msg.attributes?.uid?.toString() || `imap-${Date.now()}-${Math.random()}`;
+      const db = getDb();
+      const existing = db.prepare('SELECT id FROM email_sync_log WHERE message_id = ?').get(msgId);
+      db.close();
+      if (existing) continue;
+
+      const header = msg.parts?.find(p => p.which === 'HEADER')?.body || {};
+      const from = (header.from || [''])[0];
+      const subject = (header.subject || [''])[0];
+
+      const textPart = msg.parts?.find(p => p.which === 'TEXT');
+      const body = textPart?.body || '';
+
+      const emailMatch = from.match(/<(.+?)>/);
+      const fromEmail = emailMatch ? emailMatch[1] : from.trim();
+      const fromName = emailMatch ? from.replace(/<.+?>/, '').trim().replace(/"/g, '') : '';
+
+      processed++;
+      const result = await processEmail(account.id, msgId, fromEmail, fromName, subject, body);
+      if (result.matched) matched++;
+      if (result.issueCreated) issuesCreated++;
+    }
+
+    await connection.end();
+
+    const db2 = getDb();
+    db2.prepare('UPDATE email_accounts SET last_sync_at = CURRENT_TIMESTAMP WHERE id = ?').run(account.id);
+    db2.close();
+
+    return { processed, matched, issues: issuesCreated };
+  } catch (e) {
+    console.error('[IMAP] Sync error:', e.message);
+    return { processed: 0, matched: 0, issues: 0, error: e.message };
+  }
+}
+
 // ===== SHARED EMAIL PROCESSING =====
 
 async function processEmail(accountId, messageId, fromEmail, fromName, subject, body) {
@@ -312,6 +386,8 @@ async function syncAllAccounts() {
       let result;
       if (account.provider === 'gmail') {
         result = await syncGmailAccount(account);
+      } else if (account.provider === 'imap') {
+        result = await syncImapAccount(account);
       }
       if (result) {
         totalProcessed += result.processed || 0;
@@ -367,6 +443,8 @@ module.exports = {
   getGmailAuthUrl,
   handleGmailCallback,
   syncGmailAccount,
+  testImapConnection,
+  syncImapAccount,
   syncAllAccounts: scanAllAccountsDetailed,
   startSyncScheduler,
   stopSyncScheduler,
