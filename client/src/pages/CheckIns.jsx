@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../utils/api';
-import { ClipboardCheck, Plus, Building2, User, Calendar, ChevronRight, CheckCircle, Clock, FileEdit, Search } from 'lucide-react';
+import { ClipboardCheck, Plus, Building2, User, Calendar, ChevronRight, CheckCircle, Clock, FileEdit, Search, Trash2 } from 'lucide-react';
 
 const statusLabels = { draft: 'Draft', in_progress: 'In Progress', pending_signature: 'Pending Signature', completed: 'Completed' };
 const statusColors = {
@@ -35,6 +35,16 @@ export default function CheckIns() {
       setTenants(tens);
     }).finally(() => setLoading(false));
   }, []);
+
+  const handleDelete = async (e, inspId) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!confirm('Delete this check-in inspection? This cannot be undone.')) return;
+    try {
+      await api.deleteInspection(inspId);
+      setInspections(prev => prev.filter(i => i.id !== inspId));
+    } catch (err) { alert('Error: ' + err.message); }
+  };
 
   const handleCreate = async () => {
     if (!form.property_id || !form.inspection_date) return;
@@ -114,6 +124,9 @@ export default function CheckIns() {
                   {insp.status === 'completed' ? <CheckCircle size={12} /> : insp.status === 'pending_signature' ? <FileEdit size={12} /> : <Clock size={12} />}
                   {statusLabels[insp.status]}
                 </span>
+                <button className="btn btn-ghost btn-sm" onClick={(e) => handleDelete(e, insp.id)} title="Delete inspection" style={{ color: 'var(--text-muted)', padding: 6, flexShrink: 0 }}>
+                  <Trash2 size={14} />
+                </button>
                 <ChevronRight size={16} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
               </Link>
             );

@@ -625,4 +625,34 @@ function buildReportHTML(inspection, rooms, deductions, photos) {
   return html;
 }
 
+// ===== DELETE INSPECTION =====
+router.delete('/:id', authenticate, (req, res) => {
+  const db = getDb();
+  try {
+    const inspection = db.prepare('SELECT * FROM inspections WHERE id = ?').get(req.params.id);
+    if (!inspection) return res.status(404).json({ error: 'Inspection not found' });
+
+    // Delete photos from disk
+    const photos = db.prepare('SELECT file_path FROM inspection_photos WHERE inspection_id = ?').all(req.params.id);
+    for (const photo of photos) {
+      const fullPath = path.join(__dirname, '..', photo.file_path);
+      if (fs.existsSync(fullPath)) {
+        try { fs.unlinkSync(fullPath); } catch (e) { /* ignore */ }
+      }
+    }
+
+    // Delete all related records (cascade via foreign keys, but let's be explicit)
+    db.prepare('DELETE FROM inspection_deductions WHERE inspection_id = ?').run(req.params.id);
+    db.prepare('DELETE FROM inspection_photos WHERE inspection_id = ?').run(req.params.id);
+    const roomIds = db.prepare('SELECT id FROM inspection_rooms WHERE inspection_id = ?').all(req.params.id).map(r => r.id);
+    for (const roomId of roomIds) {
+      db.prepare('DELETE FROM inspection_items WHERE room_id = ?').run(roomId);
+    }
+    db.prepare('DELETE FROM inspection_rooms WHERE inspection_id = ?').run(req.params.id);
+    db.prepare('DELETE FROM inspections WHERE id = ?').run(req.params.id);
+
+    res.json({ success: true });
+  } finally { db.close(); }
+});
+
 module.exports = router;

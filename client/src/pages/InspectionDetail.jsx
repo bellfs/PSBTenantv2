@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { api } from '../utils/api';
-import { ArrowLeft, Camera, Plus, Save, CheckCircle, FileText, Trash2, PenTool, X, ChevronDown, ChevronUp, Upload, Loader2, Download } from 'lucide-react';
+import { ArrowLeft, Camera, Plus, Save, CheckCircle, FileText, Trash2, PenTool, X, ChevronDown, ChevronUp, Upload, Loader2, Download, AlertTriangle } from 'lucide-react';
 
 const CONDITIONS = ['excellent', 'good', 'fair', 'poor', 'damaged'];
 const CONDITION_COLORS = { excellent: '#34d399', good: '#60a5fa', fair: '#fbbf24', poor: '#f87171', damaged: '#ef4444' };
@@ -329,6 +329,19 @@ export default function InspectionDetail() {
                   Inspection Complete
                 </div>
               )}
+              <button
+                className="btn btn-danger"
+                style={{ width: '100%', justifyContent: 'center', marginTop: 4 }}
+                onClick={async () => {
+                  if (!confirm('Are you sure you want to delete this inspection? All photos, items, and deductions will be permanently removed.')) return;
+                  try {
+                    await api.deleteInspection(id);
+                    navigate(backPath);
+                  } catch (e) { alert('Error: ' + e.message); }
+                }}
+              >
+                <Trash2 size={14} /> Delete Inspection
+              </button>
             </div>
           </div>
 

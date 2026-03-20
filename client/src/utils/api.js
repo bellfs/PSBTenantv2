@@ -122,6 +122,7 @@ export const api = {
   getInspection: (id) => request(`/inspections/${id}`),
   createInspection: (data) => request('/inspections', { method: 'POST', body: JSON.stringify(data) }),
   updateInspection: (id, data) => request(`/inspections/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteInspection: (id) => request(`/inspections/${id}`, { method: 'DELETE' }),
   updateInspectionItem: (itemId, data) => request(`/inspections/items/${itemId}`, { method: 'PUT', body: JSON.stringify(data) }),
   addInspectionRoom: (id, room_name) => request(`/inspections/${id}/rooms`, { method: 'POST', body: JSON.stringify({ room_name }) }),
   addRoomItem: (roomId, item_name) => request(`/inspections/rooms/${roomId}/items`, { method: 'POST', body: JSON.stringify({ item_name }) }),
