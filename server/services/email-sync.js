@@ -7,6 +7,7 @@
 
 const { getDb } = require('../database');
 const { v4: uuidv4 } = require('uuid');
+const { sendNewIssueEmail } = require('./email');
 
 // ===== GMAIL OAUTH =====
 
@@ -264,6 +265,13 @@ async function processEmail(accountId, messageId, fromEmail, fromName, subject, 
 
             issueCreated = true;
             matchedTenantId = tenant.id;
+
+            // Send new issue email notification
+            const newIssue = db.prepare('SELECT * FROM issues WHERE id = ?').get(result.lastInsertRowid);
+            const property = tenant.property_id ? db.prepare('SELECT * FROM properties WHERE id = ?').get(tenant.property_id) : null;
+            const issueMessages = db.prepare('SELECT * FROM messages WHERE issue_id = ? ORDER BY created_at ASC').all(result.lastInsertRowid);
+            sendNewIssueEmail({ issue: newIssue, tenant, property, messages: issueMessages, attachments: [] })
+              .catch(e => console.error('[EmailSync] New issue email failed:', e.message));
 
             // Log to sync log
             db.prepare('INSERT OR IGNORE INTO email_sync_log (email_account_id, message_id, from_address, subject, matched_tenant_id, issue_id, status) VALUES (?, ?, ?, ?, ?, ?, ?)')

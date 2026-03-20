@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../App';
-import { LayoutDashboard, AlertCircle, Building2, Users, Settings, LogOut, Wrench, BarChart3, Menu, X, HardHat, ShieldCheck, ChevronRight } from 'lucide-react';
+import { LayoutDashboard, AlertCircle, Building2, Users, Settings, LogOut, Wrench, BarChart3, Menu, X, HardHat, ShieldCheck, ChevronRight, CalendarRange } from 'lucide-react';
 
 export default function Layout() {
   const { user, logout } = useAuth();
@@ -24,6 +24,7 @@ export default function Layout() {
     <>
       <NavLink to="/" end className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}><LayoutDashboard size={18} /> Dashboard</NavLink>
       <NavLink to="/issues" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}><AlertCircle size={18} /> Issues</NavLink>
+      <NavLink to="/timeline" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}><CalendarRange size={18} /> Issue Timeline</NavLink>
       <NavLink to="/properties" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}><Building2 size={18} /> Properties</NavLink>
       <NavLink to="/tenants" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}><Users size={18} /> Tenants</NavLink>
       <NavLink to="/contractors" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}><HardHat size={18} /> Contractors</NavLink>

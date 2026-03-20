@@ -13,6 +13,7 @@ import Analytics from './pages/Analytics';
 import Settings from './pages/Settings';
 import Contractors from './pages/Contractors';
 import Compliance from './pages/Compliance';
+import IssueTimeline from './pages/IssueTimeline';
 import Layout from './components/Layout';
 
 const AuthContext = createContext(null);
@@ -45,6 +46,7 @@ export default function App() {
             <Route index element={<Dashboard />} />
             <Route path="issues" element={<Issues />} />
             <Route path="issues/:id" element={<IssueDetail />} />
+            <Route path="timeline" element={<IssueTimeline />} />
             <Route path="properties" element={<Properties />} />
             <Route path="properties/:id" element={<PropertyDetail />} />
             <Route path="tenants" element={<Tenants />} />

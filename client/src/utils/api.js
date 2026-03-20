@@ -35,6 +35,7 @@ export const api = {
 
   getIssues: (params = {}) => { const qs = new URLSearchParams(params).toString(); return request(`/issues?${qs}`); },
   getIssueStats: () => request('/issues/stats'),
+  getIssueTimeline: () => request('/issues/timeline'),
   getIssue: (id) => request(`/issues/${id}`),
   updateIssue: (id, data) => request(`/issues/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteIssue: (id) => request(`/issues/${id}`, { method: 'DELETE' }),

@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../utils/api';
-import { AlertCircle, Clock, CheckCircle, AlertTriangle, Zap, TrendingUp, ShieldCheck, XCircle, ArrowUpRight, Activity, Timer, Bot, Flame, PoundSterling, Wallet, PieChart } from 'lucide-react';
+import { AlertCircle, Clock, CheckCircle, AlertTriangle, Zap, TrendingUp, ShieldCheck, XCircle, ArrowUpRight, Activity, Timer, Bot, Flame, PoundSterling, Wallet, PieChart, CalendarRange } from 'lucide-react';
+import IssueTimeline from './IssueTimeline';
 
 export default function Dashboard() {
   const [stats, setStats] = useState(null);
@@ -260,6 +261,22 @@ export default function Dashboard() {
           </div>
         </div>
       )}
+
+      {/* Issue Timeline */}
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div className="card-header">
+          <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <CalendarRange size={16} style={{ color: 'var(--accent-light)' }} />
+            Issue Timeline
+          </h3>
+          <Link to="/timeline" className="btn btn-ghost btn-sm" style={{ fontSize: 12 }}>
+            Full View <ArrowUpRight size={12} />
+          </Link>
+        </div>
+        <div className="card-body" style={{ padding: '12px 14px' }}>
+          <IssueTimeline compact />
+        </div>
+      </div>
 
       {/* Category & Property Breakdown */}
       <div className="chart-grid-2">

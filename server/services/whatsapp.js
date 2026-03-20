@@ -2,7 +2,7 @@ const axios = require('axios');
 const { getDb } = require('../database');
 const { v4: uuidv4 } = require('uuid');
 const { callLLM, analyseImage, runBackendAnalysis } = require('./llm');
-const { sendEscalationEmail } = require('./email');
+const { sendEscalationEmail, sendNewIssueEmail } = require('./email');
 const fs = require('fs');
 const path = require('path');
 
@@ -313,7 +313,27 @@ If escalating instead, end with: "Is there anything else you need help with?"`;
 
       // Run silent backend analysis for the team
       if (diagnosisRound === 0 || (diagnosisRound > 0 && diagnosisRound % 2 === 0)) {
-        runBackendAnalysis(activeIssue.id, conversationMessages).catch(e => console.error('[Backend] Analysis failed:', e.message));
+        runBackendAnalysis(activeIssue.id, conversationMessages)
+          .then(() => {
+            // Send new issue email after first backend analysis completes
+            if (diagnosisRound === 0) {
+              const freshIssue = db.prepare('SELECT * FROM issues WHERE id = ?').get(activeIssue.id);
+              const issueMessages = db.prepare('SELECT * FROM messages WHERE issue_id = ? ORDER BY created_at ASC').all(activeIssue.id);
+              const issueAttachments = db.prepare('SELECT * FROM attachments WHERE issue_id = ?').all(activeIssue.id);
+              sendNewIssueEmail({ issue: freshIssue || activeIssue, tenant, property, messages: issueMessages, attachments: issueAttachments })
+                .catch(e => console.error('[Email] New issue email failed:', e.message));
+            }
+          })
+          .catch(e => {
+            console.error('[Backend] Analysis failed:', e.message);
+            // Still send new issue email even if analysis fails
+            if (diagnosisRound === 0) {
+              const issueMessages = db.prepare('SELECT * FROM messages WHERE issue_id = ? ORDER BY created_at ASC').all(activeIssue.id);
+              const issueAttachments = db.prepare('SELECT * FROM attachments WHERE issue_id = ?').all(activeIssue.id);
+              sendNewIssueEmail({ issue: activeIssue, tenant, property, messages: issueMessages, attachments: issueAttachments })
+                .catch(e2 => console.error('[Email] New issue email failed:', e2.message));
+            }
+          });
       }
 
       await sendWhatsAppMessage(from, aiResponse);

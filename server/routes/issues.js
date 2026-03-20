@@ -31,6 +31,23 @@ router.get('/', authenticate, (req, res) => {
   } finally { db.close(); }
 });
 
+router.get('/timeline', authenticate, (req, res) => {
+  const db = getDb();
+  try {
+    const issues = db.prepare(`
+      SELECT i.id, i.uuid, i.title, i.status, i.priority, i.category,
+        i.created_at, i.escalated_at, i.resolved_at, i.updated_at,
+        i.ai_diagnosis, i.estimated_cost, i.flat_number,
+        t.name as tenant_name, p.name as property_name
+      FROM issues i
+      LEFT JOIN tenants t ON i.tenant_id = t.id
+      LEFT JOIN properties p ON i.property_id = p.id
+      ORDER BY i.created_at DESC
+    `).all();
+    res.json({ issues });
+  } finally { db.close(); }
+});
+
 router.get('/stats', authenticate, (req, res) => {
   const db = getDb();
   try {
