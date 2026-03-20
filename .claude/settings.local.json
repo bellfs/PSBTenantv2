@@ -83,7 +83,11 @@
       "Bash(PATH=/Users/fergusbell/.local/bin:$PATH /Users/fergusbell/.local/bin/npm ls xlsx)",
       "Bash(find . -path */xlsx/package.json -maxdepth 4)",
       "Bash(PATH=\"/Users/fergusbell/.local/bin:$PATH\" /Users/fergusbell/.local/bin/npm install xlsx)",
-      "Bash(grep -l MessageSquareWarning /Users/fergusbell/Downloads/psb-v5-full-upgrade/client/node_modules/lucide-react/dist/*.js)"
+      "Bash(grep -l MessageSquareWarning /Users/fergusbell/Downloads/psb-v5-full-upgrade/client/node_modules/lucide-react/dist/*.js)",
+      "Bash(python3 -c \"import openpyxl; print\\(''openpyxl available''\\)\")",
+      "Bash(python3 -c \"import pandas; print\\(''pandas available''\\)\")",
+      "Bash(python3:*)",
+      "Bash(PATH=\"/Users/fergusbell/.local/bin:$PATH\" npm run build)"
     ]
   }
 }

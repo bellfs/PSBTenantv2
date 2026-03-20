@@ -40,7 +40,7 @@ export default function Dashboard() {
     api.getSlaMetrics().then(setSla).catch(() => {});
     api.getBudgets().then(setBudgets).catch(() => {});
     api.getComplianceSummary().then(setCompliance).catch(() => {});
-    api.getUtilityAnalytics().then(setUtilities).catch(() => {});
+    api.getUtilityAnalytics(2025).then(setUtilities).catch(() => {});
   }, []);
   if (!stats) return <div style={{ padding: 40, textAlign: 'center' }}><div className="loading-spinner" style={{ margin: '0 auto' }} /></div>;
 
@@ -459,14 +459,18 @@ export default function Dashboard() {
           </div>
           <div className="card-body" style={{ padding: '12px 16px' }}>
             {(() => {
-              const props = utilities.properties || [];
-              const totalGas = props.reduce((s, p) => s + (p.gas_cost || 0), 0);
-              const totalElec = props.reduce((s, p) => s + (p.electric_cost || 0), 0);
+              const props = (utilities.propertyTotals || []).map(p => ({
+                name: p.display_name,
+                gas_cost: p.total_gas_cost || 0,
+                electric_cost: p.total_electric_cost || 0,
+              }));
+              const totalGas = props.reduce((s, p) => s + p.gas_cost, 0);
+              const totalElec = props.reduce((s, p) => s + p.electric_cost, 0);
               const totalCombined = totalGas + totalElec;
               const topSpender = props.length > 0
-                ? props.reduce((top, p) => ((p.gas_cost || 0) + (p.electric_cost || 0)) > ((top.gas_cost || 0) + (top.electric_cost || 0)) ? p : top, props[0])
+                ? props.reduce((top, p) => (p.gas_cost + p.electric_cost) > (top.gas_cost + top.electric_cost) ? p : top, props[0])
                 : null;
-              const topSpend = topSpender ? (topSpender.gas_cost || 0) + (topSpender.electric_cost || 0) : 0;
+              const topSpend = topSpender ? topSpender.gas_cost + topSpender.electric_cost : 0;
 
               return (
                 <>
