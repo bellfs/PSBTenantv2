@@ -15,6 +15,25 @@ const DEFAULT_TEAM_RECIPIENTS = [
   'fergus@fiftytwo-group.com'
 ];
 
+const SHORT_LET_CHANNELS = [
+  'airbnb',
+  'booking.com',
+  'expedia',
+  'hotels.com',
+  'vrbo',
+  'guesty',
+  'hostaway',
+  'smoobu'
+];
+
+const PROPERTY_HINTS = [
+  { name: '52 Old Elvet', aliases: ['52 old elvet', 'old elvet', 'psb52', 'the villiers', 'the barrington', 'the egerton', 'the wolsey', 'the tunstall', 'the montague', 'the morton', 'the gray', 'the langley', 'the kirkham', 'the fordham', 'talbot penthouse'] },
+  { name: '2 St Margarets Mews', aliases: ['2 st margarets', 'st margarets mews', 'st margaret', 'margarets'] },
+  { name: '35 St Andrews Court', aliases: ['35 st andrews', 'st andrews court', 'st andrews'] },
+  { name: '7 Cathedrals', aliases: ['7 cathedrals', 'cathedrals'] },
+  { name: '24 Hallgarth Street', aliases: ['24 hallgarth', 'hallgarth street', 'hallgarth'] }
+];
+
 function getTeamRecipients() {
   return (process.env.EMAIL_AGENT_TEAM_RECIPIENTS || DEFAULT_TEAM_RECIPIENTS.join(','))
     .split(',')
@@ -133,6 +152,26 @@ function isLikelyAutomatedEmail(fromEmail = '', subject = '', body = '') {
   return isNoReplyAddress(from) ||
     /(mailer-daemon|postmaster|calendar-notification|drive-shares|notifications?@|alerts?@)/i.test(from) ||
     /(newsletter|unsubscribe|do not reply|automated message|security alert|delivery status notification)/i.test(text);
+}
+
+function detectCommercialContext({ subject = '', body = '', fromEmail = '', fromName = '' }) {
+  const from = `${fromEmail} ${fromName}`.toLowerCase();
+  const text = `${subject}\n${body}`.toLowerCase();
+  const haystack = `${from}\n${text}`;
+  const channel = SHORT_LET_CHANNELS.find(name => haystack.includes(name));
+  const propertyHints = PROPERTY_HINTS
+    .filter(property => property.aliases.some(alias => haystack.includes(alias)))
+    .map(property => property.name);
+  const shortLetAction = /(guest message|guest request|alteration request|cancell?ation|cancelled|complaint|damage|refund|chargeback|payment failed|booking request|reservation request|check[- ]?in today|check[- ]?out today|review|missing key|late arrival|cleaning issue)/i.test(haystack);
+  const bookingReference = haystack.match(/\b([A-Z0-9]{6,}[-_]?[A-Z0-9]{2,})\b/i)?.[1] || null;
+
+  return {
+    channel: channel || null,
+    property_hints: propertyHints,
+    booking_reference: bookingReference,
+    short_let_action: shortLetAction,
+    is_short_let: !!channel || /(short[- ]?let|guest|reservation|check[- ]?in|check[- ]?out|cleaner|linen)/i.test(haystack)
+  };
 }
 
 function buildNameSearchTerms(fromName = '', tenant = null) {
@@ -324,9 +363,161 @@ function formatInternalMemoryBrief(memory) {
   return lines.join('\n');
 }
 
+function parseJsonObject(value) {
+  if (!value) return null;
+  try {
+    const cleaned = String(value).trim().replace(/```json\s*/g, '').replace(/```\s*/g, '');
+    const start = cleaned.indexOf('{');
+    const end = cleaned.lastIndexOf('}');
+    if (start !== -1 && end !== -1) return JSON.parse(cleaned.slice(start, end + 1));
+    return JSON.parse(cleaned);
+  } catch {
+    return null;
+  }
+}
+
+function boolFlag(value) {
+  if (value === true || value === 1 || value === '1') return 1;
+  if (typeof value === 'string') return ['true', 'yes', 'y'].includes(value.toLowerCase()) ? 1 : 0;
+  return 0;
+}
+
+function clampChoice(value, allowed, fallback) {
+  const clean = String(value || '').toLowerCase().replace(/\s+/g, '_');
+  return allowed.includes(clean) ? clean : fallback;
+}
+
+function readMemorySnippets(classification) {
+  const paths = [
+    'wiki/context/property-operating-facts.md',
+    'wiki/context/durham-city.md',
+    'wiki/context/energy-contracts-and-suppliers.md',
+    'wiki/context/workmen-team-contractors.md',
+    'wiki/context/email-correspondence.md',
+    'raw/recent-whatsapp.md',
+    'raw/recent-email.md'
+  ];
+  if (classification?.domain === 'short_lets') {
+    paths.unshift('wiki/context/property-operating-facts.md');
+  }
+
+  try {
+    const businessMemory = require('./business-memory');
+    return paths.map(filePath => {
+      try {
+        const file = businessMemory.readMemoryFile(filePath);
+        return { path: filePath, content: truncate(file.content, 2200) };
+      } catch {
+        return null;
+      }
+    }).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+async function refineEmailClassificationWithAI({ heuristic, subject, body, fromEmail, fromName, tenant, issue, memory }) {
+  let refined = { ...heuristic };
+  const memorySnippets = readMemorySnippets(heuristic);
+  try {
+    const { callLLM } = require('./llm');
+    const prompt = `You classify inbound email for FFR Property OS.
+
+The goal is to decide whether the email is:
+- a task the team must act on,
+- a reply-needed human correspondence,
+- an automated notification that should only enrich Business Memory,
+- or short-let platform context from Airbnb, Booking.com, Expedia, etc.
+
+Known short-let properties include 52 Old Elvet, 2 St Margarets Mews, 35 St Andrews Court and 7 Cathedrals.
+Booking.com, Expedia, Airbnb and similar platform emails usually relate to short-term lets at those properties unless context proves otherwise.
+
+Heuristic classification:
+${JSON.stringify(heuristic, null, 2)}
+
+Matched tenant: ${tenant ? `${tenant.name} at ${tenant.property_name || tenant.flat_number || 'unknown property'}` : 'none'}
+Matched issue: ${issue ? `${issue.uuid || issue.id}: ${issue.title}` : 'none'}
+
+Relevant Business Memory summary:
+${formatInternalMemoryBrief(memory) || 'No close match in stored emails/WhatsApp/tasks.'}
+
+Memory file snippets:
+${memorySnippets.map(snippet => `--- ${snippet.path} ---\n${snippet.content}`).join('\n\n') || 'No memory files available yet.'}
+
+Email:
+From: ${fromName || ''} <${fromEmail || ''}>
+Subject: ${subject || ''}
+Body preview:
+${truncate(body, 5000)}
+
+Return ONLY valid JSON with this exact shape:
+{
+  "domain": "maintenance|finance|compliance|leasing|short_lets|utilities|contractors|operations|development",
+  "priority": "low|medium|high|urgent",
+  "message_kind": "task|reply_needed|notification|automated|booking|context|correspondence",
+  "is_automated": true,
+  "needs_reply": false,
+  "needs_team_followup": true,
+  "suggested_owner": "email address or team name",
+  "summary": "one sentence",
+  "risk_level": "low|medium|high",
+  "suggested_action": "specific next action or file for context",
+  "property_hints": ["property names"],
+  "supplier_or_channel": "supplier/channel/person if clear",
+  "confidence": 0.0
+}`;
+
+    const response = await callLLM([{ role: 'user', content: prompt }], { maxTokens: 700 });
+    const parsed = parseJsonObject(response);
+    if (parsed) {
+      refined = {
+        ...refined,
+        domain: clampChoice(parsed.domain, ['maintenance', 'finance', 'compliance', 'leasing', 'short_lets', 'utilities', 'contractors', 'operations', 'development'], refined.domain),
+        priority: clampChoice(parsed.priority, ['low', 'medium', 'high', 'urgent'], refined.priority),
+        message_kind: clampChoice(parsed.message_kind, ['task', 'reply_needed', 'notification', 'automated', 'booking', 'context', 'correspondence'], refined.message_kind || 'correspondence'),
+        is_automated: boolFlag(parsed.is_automated),
+        needs_reply: boolFlag(parsed.needs_reply),
+        needs_team_followup: boolFlag(parsed.needs_team_followup),
+        suggested_owner: parsed.suggested_owner || refined.suggested_owner,
+        summary: truncate(parsed.summary || refined.summary, 240),
+        risk_level: clampChoice(parsed.risk_level, ['low', 'medium', 'high'], refined.risk_level || 'medium'),
+        classification_source: 'ai_memory',
+        detected_entities: {
+          ...(refined.detected_entities || {}),
+          property_hints: Array.isArray(parsed.property_hints) ? parsed.property_hints.filter(Boolean).slice(0, 8) : refined.detected_entities?.property_hints || [],
+          supplier_or_channel: parsed.supplier_or_channel || refined.detected_entities?.supplier_or_channel || null,
+          confidence: Number(parsed.confidence || 0) || null
+        },
+        action: {
+          ...(refined.action || {}),
+          suggested_action: parsed.suggested_action || refined.action?.suggested_action || 'Review and file.',
+          requires_human_approval: boolFlag(parsed.needs_reply) || refined.action?.requires_human_approval || false
+        }
+      };
+    }
+  } catch (error) {
+    refined.classification_source = 'heuristic';
+  }
+
+  const automated = refined.is_automated || isLikelyAutomatedEmail(fromEmail, subject, body);
+  if (automated) refined.is_automated = 1;
+  if (automated && isNoReplyAddress(fromEmail)) refined.needs_reply = 0;
+  if (refined.message_kind === 'notification' || refined.message_kind === 'automated') {
+    refined.needs_reply = 0;
+  }
+  if (refined.message_kind === 'reply_needed') refined.needs_reply = 1;
+  if (refined.message_kind === 'task' || refined.message_kind === 'booking') refined.needs_team_followup = 1;
+  refined.needs_reply = boolFlag(refined.needs_reply);
+  refined.needs_team_followup = boolFlag(refined.needs_team_followup);
+  refined.memory_files = memorySnippets.map(snippet => snippet.path);
+  return refined;
+}
+
 function classifyEmail({ subject = '', body = '', fromEmail = '', fromName = '', tenant = null, issueId = null }) {
   const text = `${subject}\n${body}`.toLowerCase();
   const has = (...patterns) => patterns.some(pattern => pattern.test(text));
+  const automated = isLikelyAutomatedEmail(fromEmail, subject, body);
+  const commercialContext = detectCommercialContext({ subject, body, fromEmail, fromName });
 
   let domain = 'operations';
   if (issueId || has(/repair/, /broken/, /leak/, /heating/, /boiler/, /plumb/, /electric/, /damp/, /mould/, /toilet/, /shower/, /lock/, /window/, /door/)) {
@@ -341,7 +532,7 @@ function classifyEmail({ subject = '', body = '', fromEmail = '', fromName = '',
   if (has(/contract/, /tenancy/, /guarantor/, /viewing/, /reservation/, /move[- ]?in/, /move[- ]?out/, /keys?/, /rent offer/)) {
     domain = 'leasing';
   }
-  if (has(/booking/, /guest/, /airbnb/, /guesty/, /cleaning/, /linen/, /check[- ]?in/, /check[- ]?out/)) {
+  if (commercialContext.is_short_let || has(/booking/, /guest/, /airbnb/, /guesty/, /cleaning/, /linen/, /check[- ]?in/, /check[- ]?out/)) {
     domain = 'short_lets';
   }
   if (has(/utility/, /meter/, /electricity/, /water bill/, /gas bill/, /supplier/, /octopus/, /edf/, /british gas/)) {
@@ -365,7 +556,7 @@ function classifyEmail({ subject = '', body = '', fromEmail = '', fromName = '',
     /\?/.test(body) ||
     has(/can you/, /could you/, /please/, /let me know/, /confirm/, /advise/, /reply/, /respond/, /follow up/, /chase/, /would you/, /are you able/, /need help/, /need to arrange/);
 
-  const needsReply = !isLikelyAutomatedEmail(fromEmail, subject, body) && !clearlyInformational && (
+  const needsReply = !automated && !clearlyInformational && (
     directAsk ||
     domain !== 'operations' ||
     !!tenant ||
@@ -377,6 +568,10 @@ function classifyEmail({ subject = '', body = '', fromEmail = '', fromName = '',
     directAsk ||
     has(/need to/, /please can/, /can someone/, /make sure/, /book/, /arrange/, /send/, /pay/, /approve/, /sign/, /deadline/, /chase/)
   );
+  const shortLetNeedsAction = commercialContext.is_short_let && commercialContext.short_let_action;
+  const messageKind = automated
+    ? (shortLetNeedsAction ? 'booking' : 'notification')
+    : needsReply ? 'reply_needed' : needsTeamFollowup ? 'task' : clearlyInformational ? 'context' : 'correspondence';
 
   const highRisk = domain === 'finance' || domain === 'compliance' || has(/legal/, /notice/, /deposit/, /payment/, /bank/, /contract/, /evict/, /claim/, /refund/);
   const ownerByDomain = {
@@ -400,11 +595,19 @@ function classifyEmail({ subject = '', body = '', fromEmail = '', fromName = '',
   return {
     domain,
     priority,
+    message_kind: messageKind,
+    is_automated: automated ? 1 : 0,
+    classification_source: 'heuristic',
     needs_reply: needsReply ? 1 : 0,
-    needs_team_followup: needsTeamFollowup ? 1 : 0,
+    needs_team_followup: (needsTeamFollowup || shortLetNeedsAction) ? 1 : 0,
     suggested_owner: ownerByDomain[domain] || ownerByDomain.operations,
     summary,
     risk_level: highRisk ? 'high' : priority === 'urgent' ? 'high' : 'medium',
+    detected_entities: {
+      property_hints: commercialContext.property_hints,
+      supplier_or_channel: commercialContext.channel,
+      booking_reference: commercialContext.booking_reference
+    },
     action: {
       suggested_action: suggestedAction,
       requires_human_approval: highRisk || needsReply,
@@ -498,20 +701,42 @@ async function recordEmailItem({ accountId, messageId, gmailThreadId, fromEmail,
       : null;
     const issue = issueId ? db.prepare('SELECT * FROM issues WHERE id = ?').get(issueId) : null;
     const log = db.prepare('SELECT id FROM email_sync_log WHERE message_id = ?').get(messageId);
-    const classification = classifyEmail({ subject, body, fromEmail, fromName, tenant, issueId });
-    const memory = buildBusinessMemory(db, { messageId, fromEmail, fromName, tenant, issue, classification });
+    const heuristicClassification = classifyEmail({ subject, body, fromEmail, fromName, tenant, issueId });
+    let memory = buildBusinessMemory(db, { messageId, fromEmail, fromName, tenant, issue, classification: heuristicClassification });
+    let classification = await refineEmailClassificationWithAI({
+      heuristic: heuristicClassification,
+      subject,
+      body,
+      fromEmail,
+      fromName,
+      tenant,
+      issue,
+      memory
+    });
+    if (classification.domain !== heuristicClassification.domain) {
+      memory = buildBusinessMemory(db, { messageId, fromEmail, fromName, tenant, issue, classification });
+    }
     const memorySummary = summariseBusinessMemory(memory);
     const actionWithMemory = {
       ...classification.action,
-      business_memory: memorySummary
+      business_memory: memorySummary,
+      detected_entities: classification.detected_entities || {},
+      classification_source: classification.classification_source || 'heuristic'
+    };
+    const memoryRefs = {
+      files: classification.memory_files || [],
+      previous_email_count: memorySummary.previous_email_count,
+      whatsapp_context_count: memorySummary.whatsapp_issue_message_count + memorySummary.whatsapp_intake_person_count + memorySummary.whatsapp_intake_domain_count,
+      related_issue_count: memorySummary.related_issue_count,
+      open_task_count: memorySummary.open_task_count
     };
 
     const itemId = db.prepare(`
       INSERT INTO email_agent_items (
         email_account_id, email_sync_log_id, message_id, from_address, from_name, subject, body_preview,
-        matched_tenant_id, issue_id, domain, priority, status, needs_reply, needs_team_followup,
-        suggested_owner, summary, action_json
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        matched_tenant_id, issue_id, domain, priority, message_kind, is_automated, classification_source,
+        status, needs_reply, needs_team_followup, suggested_owner, summary, action_json, memory_refs_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       accountId,
       log?.id || null,
@@ -524,12 +749,16 @@ async function recordEmailItem({ accountId, messageId, gmailThreadId, fromEmail,
       issueId || null,
       classification.domain,
       classification.priority,
+      classification.message_kind || 'correspondence',
+      classification.is_automated ? 1 : 0,
+      classification.classification_source || 'heuristic',
       status || 'processed',
       classification.needs_reply,
       classification.needs_team_followup,
       classification.suggested_owner,
       classification.summary,
-      JSON.stringify(actionWithMemory)
+      JSON.stringify(actionWithMemory),
+      JSON.stringify(memoryRefs)
     ).lastInsertRowid;
 
     let draftId = null;
@@ -837,7 +1066,7 @@ function buildDailyReport(date = todayKey()) {
       ...(drafts.slice(0, 10).map(draft => `- ${draft.to_address}: ${draft.subject} (${draft.status})`)),
       ...(drafts.length === 0 ? ['- No reply drafts waiting.'] : []),
       '',
-      'This report is generated from connected admin inbox sync, FFR Property OS tasks, and agent approvals.'
+      'This report is generated from connected inbox sync, FFR Property OS tasks, and agent approvals.'
     ];
 
     const bodyText = lines.join('\n');

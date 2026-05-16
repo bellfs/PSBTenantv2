@@ -8,6 +8,8 @@
 const { getDb } = require('../database');
 const { v4: uuidv4 } = require('uuid');
 const { sendNewIssueEmail } = require('./email');
+const jwt = require('jsonwebtoken');
+const { JWT_SECRET } = require('../middleware/auth');
 
 // ===== GMAIL OAUTH =====
 
@@ -27,11 +29,27 @@ function getGmailOAuth2Client() {
   return new google.auth.OAuth2(clientId, clientSecret, redirectUri);
 }
 
-function getGmailAuthUrl() {
+function normaliseOwner(user = {}) {
+  return {
+    id: user.id || user.staff_id || null,
+    email: user.email || null,
+    name: user.name || user.email || null,
+    role: user.role || null
+  };
+}
+
+function getGmailAuthUrl(user = {}) {
   const oauth2Client = getGmailOAuth2Client();
+  const owner = normaliseOwner(user);
+  const state = jwt.sign(
+    { purpose: 'gmail_oauth', ...owner },
+    JWT_SECRET,
+    { expiresIn: '20m' }
+  );
   return oauth2Client.generateAuthUrl({
     access_type: 'offline',
     prompt: 'consent',
+    state,
     scope: [
       'https://www.googleapis.com/auth/gmail.readonly',
       'https://www.googleapis.com/auth/gmail.compose',
@@ -40,7 +58,7 @@ function getGmailAuthUrl() {
   });
 }
 
-async function handleGmailCallback(code) {
+async function handleGmailCallback(code, ownerPayload = {}) {
   const oauth2Client = getGmailOAuth2Client();
   const { tokens } = await oauth2Client.getToken(code);
   oauth2Client.setCredentials(tokens);
@@ -57,22 +75,46 @@ async function handleGmailCallback(code) {
   // point at email_accounts.id, so reconnecting must preserve the existing id.
   const db = getDb();
   try {
+    const owner = normaliseOwner(ownerPayload);
     const existing = db.prepare('SELECT id FROM email_accounts WHERE provider = ? AND LOWER(email_address) = LOWER(?)').get('gmail', email);
     let id;
     if (existing) {
+      const current = db.prepare('SELECT credentials FROM email_accounts WHERE id = ?').get(existing.id);
+      const currentCredentials = current?.credentials ? JSON.parse(current.credentials) : {};
+      const nextCredentials = { ...currentCredentials, ...tokens, refresh_token: tokens.refresh_token || currentCredentials.refresh_token };
       db.prepare(`
         UPDATE email_accounts
-        SET credentials = ?, sync_enabled = 1
+        SET credentials = ?,
+            sync_enabled = 1,
+            connected_by_staff_id = ?,
+            connected_by_email = ?,
+            connected_by_name = ?,
+            connection_scope = 'team_context',
+            sync_window_days = COALESCE(sync_window_days, 30)
         WHERE id = ?
-      `).run(JSON.stringify(tokens), existing.id);
+      `).run(JSON.stringify(nextCredentials), owner.id, owner.email, owner.name, existing.id);
       id = existing.id;
     } else {
-      id = db.prepare('INSERT INTO email_accounts (provider, email_address, credentials, sync_enabled) VALUES (?, ?, ?, 1)')
-        .run('gmail', email, JSON.stringify(tokens)).lastInsertRowid;
+      id = db.prepare(`
+        INSERT INTO email_accounts (
+          provider, email_address, credentials, sync_enabled,
+          connected_by_staff_id, connected_by_email, connected_by_name, connection_scope, sync_window_days
+        ) VALUES (?, ?, ?, 1, ?, ?, ?, 'team_context', 30)
+      `).run('gmail', email, JSON.stringify(tokens), owner.id, owner.email, owner.name).lastInsertRowid;
     }
     console.log(`[Gmail] Connected: ${email}`);
     return { id, email, provider: 'gmail' };
   } finally { db.close(); }
+}
+
+function accountScopedMessageId(account, providerMessageId) {
+  return `gmail-${account.id}-${providerMessageId}`;
+}
+
+function getSyncWindowDays(account, fallback = 30) {
+  const configured = Number(account.sync_window_days || process.env.EMAIL_SYNC_WINDOW_DAYS || fallback);
+  if (!Number.isFinite(configured) || configured <= 0) return fallback;
+  return Math.min(Math.max(Math.round(configured), 1), 180);
 }
 
 async function syncGmailAccount(account) {
@@ -85,9 +127,10 @@ async function syncGmailAccount(account) {
   if (tokens.expiry_date && tokens.expiry_date < Date.now()) {
     try {
       const { credentials } = await oauth2Client.refreshAccessToken();
-      oauth2Client.setCredentials(credentials);
+      const nextCredentials = { ...tokens, ...credentials, refresh_token: credentials.refresh_token || tokens.refresh_token };
+      oauth2Client.setCredentials(nextCredentials);
       const db = getDb();
-      db.prepare('UPDATE email_accounts SET credentials = ? WHERE id = ?').run(JSON.stringify(credentials), account.id);
+      db.prepare('UPDATE email_accounts SET credentials = ? WHERE id = ?').run(JSON.stringify(nextCredentials), account.id);
       db.close();
     } catch (e) {
       console.error('[Gmail] Token refresh failed:', e.message);
@@ -97,19 +140,24 @@ async function syncGmailAccount(account) {
 
   const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
 
-  // Get messages from last 3 days (broader window for manual scans)
-  const after = Math.floor((Date.now() - 3 * 86400000) / 1000);
+  // Keep connected inboxes useful as long-running context sources. First scans and
+  // manual scans use a broad window; duplicates are skipped by account-scoped ids.
+  const syncWindowDays = account.last_sync_at
+    ? getSyncWindowDays(account, 30)
+    : getSyncWindowDays({ sync_window_days: process.env.EMAIL_INITIAL_BACKFILL_DAYS || account.sync_window_days }, 30);
+  const after = Math.floor((Date.now() - syncWindowDays * 86400000) / 1000);
   const query = `after:${after} -from:me`;
 
   try {
-    const listRes = await gmail.users.messages.list({ userId: 'me', q: query, maxResults: 50 });
+    const listRes = await gmail.users.messages.list({ userId: 'me', q: query, maxResults: 100 });
     const messages = listRes.data.messages || [];
     let processed = 0, matched = 0, issuesCreated = 0;
 
     for (const msg of messages) {
       const db = getDb();
       // Skip if already processed
-      const existing = db.prepare('SELECT id FROM email_sync_log WHERE message_id = ?').get(msg.id);
+      const internalMessageId = accountScopedMessageId(account, msg.id);
+      const existing = db.prepare('SELECT id FROM email_sync_log WHERE message_id IN (?, ?)').get(internalMessageId, msg.id);
       db.close();
       if (existing) continue;
 
@@ -128,14 +176,17 @@ async function syncGmailAccount(account) {
       let body = extractBodyText(fullMsg.data.payload);
 
       processed++;
-      const result = await processEmail(account.id, msg.id, fromEmail, fromName, subject, body, { gmailThreadId: fullMsg.data.threadId });
+      const result = await processEmail(account.id, internalMessageId, fromEmail, fromName, subject, body, {
+        gmailThreadId: fullMsg.data.threadId,
+        providerMessageId: msg.id
+      });
       if (result.matched) matched++;
       if (result.issueCreated) issuesCreated++;
     }
 
     // Update last sync time
     const db2 = getDb();
-    db2.prepare('UPDATE email_accounts SET last_sync_at = CURRENT_TIMESTAMP WHERE id = ?').run(account.id);
+    db2.prepare('UPDATE email_accounts SET last_sync_at = CURRENT_TIMESTAMP, last_context_at = CASE WHEN ? > 0 THEN CURRENT_TIMESTAMP ELSE last_context_at END WHERE id = ?').run(processed, account.id);
     db2.close();
 
     return { processed, matched, issues: issuesCreated };
@@ -243,8 +294,8 @@ async function syncImapAccount(account) {
 
     await connection.openBox('INBOX');
 
-    // Search for emails from last 7 days - pass Date object for IMAP compatibility
-    const since = new Date(Date.now() - 7 * 86400000);
+    // Search for emails across the account context window - pass Date object for IMAP compatibility
+    const since = new Date(Date.now() - getSyncWindowDays(account, 30) * 86400000);
     const searchCriteria = [['SINCE', since]];
     const fetchOptions = { bodies: ['HEADER', 'TEXT'], struct: true };
 
@@ -283,7 +334,7 @@ async function syncImapAccount(account) {
     await connection.end();
 
     const db2 = getDb();
-    db2.prepare('UPDATE email_accounts SET last_sync_at = CURRENT_TIMESTAMP WHERE id = ?').run(account.id);
+    db2.prepare('UPDATE email_accounts SET last_sync_at = CURRENT_TIMESTAMP, last_context_at = CASE WHEN ? > 0 THEN CURRENT_TIMESTAMP ELSE last_context_at END WHERE id = ?').run(processed, account.id);
     db2.close();
 
     console.log(`[IMAP] Sync complete for ${account.email_address}: processed=${processed} matched=${matched} issues=${issuesCreated}`);
@@ -454,6 +505,21 @@ Return ONLY valid JSON, no markdown or explanation.`;
 // ===== SYNC SCHEDULER =====
 
 let syncInterval = null;
+let memorySnapshotTimer = null;
+
+function scheduleBusinessMemorySnapshot(reason = 'email-sync') {
+  if (process.env.EMAIL_SYNC_MEMORY_SNAPSHOT === 'false') return;
+  if (memorySnapshotTimer) clearTimeout(memorySnapshotTimer);
+  memorySnapshotTimer = setTimeout(() => {
+    try {
+      const { snapshotBusinessMemory } = require('./business-memory');
+      snapshotBusinessMemory({ createdBy: reason });
+      console.log(`[EmailSync] Business Memory snapshot refreshed after ${reason}`);
+    } catch (error) {
+      console.error('[EmailSync] Business Memory snapshot failed:', error.message);
+    }
+  }, Number(process.env.EMAIL_SYNC_MEMORY_SNAPSHOT_DELAY_MS || 15000));
+}
 
 async function syncAllAccounts() {
   const db = getDb();
@@ -490,6 +556,7 @@ async function syncAllAccounts() {
     }
   }
 
+  if (totalProcessed > 0) scheduleBusinessMemorySnapshot('email-sync');
   return { accounts: accounts.length, processed: totalProcessed, matched: totalMatched, issues: totalIssues, results };
 }
 

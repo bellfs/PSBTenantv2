@@ -220,7 +220,7 @@ export default function Layout() {
         <SidebarLink to="/check-ins" icon={ClipboardCheck} label="Check-In" />
         <SidebarLink to="/check-outs" icon={ClipboardList} label="Check-Out" />
         <SidebarLink to="/timeline" icon={CalendarRange} label="Timeline" />
-        {user?.role === 'admin' && <SidebarLink to="/settings" icon={Settings} label="Settings" />}
+        <SidebarLink to="/settings" icon={Settings} label="Settings" />
       </NavSection>
     </>
   );

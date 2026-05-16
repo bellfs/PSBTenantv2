@@ -5,7 +5,8 @@ import { Save, Plus, Mail, RefreshCw, Trash2, Power, PowerOff } from 'lucide-rea
 
 export default function Settings() {
   const { user } = useAuth();
-  const [tab, setTab] = useState('ai');
+  const isAdmin = user?.role === 'admin';
+  const [tab, setTab] = useState('email');
   const [settings, setSettings] = useState({});
   const [staff, setStaff] = useState([]);
   const [saved, setSaved] = useState(false);
@@ -29,8 +30,16 @@ export default function Settings() {
     if (params.get('gmail') === 'error') setEmailError(params.get('msg') || 'Gmail connection failed');
   }, []);
 
-  useEffect(() => { api.getSettings().then(setSettings); api.getStaff().then(setStaff); }, []);
+  useEffect(() => {
+    if (isAdmin) {
+      api.getSettings().then(setSettings).catch(() => {});
+      api.getStaff().then(setStaff).catch(() => {});
+    }
+  }, [isAdmin]);
   useEffect(() => { if (tab === 'email') loadEmailAccounts(); }, [tab]);
+  useEffect(() => {
+    if (!isAdmin && !['email', 'account'].includes(tab)) setTab('email');
+  }, [isAdmin, tab]);
 
   const loadEmailAccounts = () => {
     api.getEmailAccounts().then(setEmailAccounts).catch(() => {});
@@ -93,9 +102,11 @@ export default function Settings() {
     loadEmailAccounts();
   };
 
-  const tabConfig = [
+  const tabConfig = isAdmin ? [
     ['ai', 'AI Config'], ['whatsapp', 'WhatsApp'], ['notifications', 'Notifications'],
     ['email', 'Email Sync'], ['team', 'Team'], ['account', 'Account']
+  ] : [
+    ['email', 'Email Sync'], ['account', 'Account']
   ];
 
   return (
@@ -275,22 +286,23 @@ export default function Settings() {
         <div className="card" style={{marginBottom:16}}>
           <div className="card-header"><h3>Connected Email Accounts</h3></div>
           {emailAccounts.length > 0 ? (
-            <div className="table-container"><table><thead><tr><th>Provider</th><th>Email</th><th>Last Sync</th><th>Status</th><th>Actions</th></tr></thead><tbody>
+            <div className="table-container"><table><thead><tr><th>Provider</th><th>Email</th><th>Connected By</th><th>Last Sync</th><th>Status</th><th>Actions</th></tr></thead><tbody>
               {emailAccounts.map(a => (
                 <tr key={a.id}>
                   <td><span className="badge" style={{background: a.provider === 'gmail' ? '#ea4335' : '#2196f3', color: '#fff', textTransform:'capitalize'}}>{a.provider}</span></td>
                   <td style={{fontWeight:500}}>{a.email_address}</td>
+                  <td style={{fontSize:12,color:'var(--text-secondary)'}}>{a.owner_label || a.connected_by_name || a.connected_by_email || 'Team account'}</td>
                   <td style={{fontSize:12,color:'var(--text-secondary)'}}>{a.last_sync_at ? new Date(a.last_sync_at).toLocaleString('en-GB') : 'Never'}</td>
                   <td>{a.sync_enabled ? <span className="badge badge-resolved">Active</span> : <span className="badge badge-closed">Paused</span>}</td>
                   <td>
                     <div style={{display:'flex',gap:6}}>
-                      <button className="btn btn-ghost btn-sm" onClick={()=>triggerSync(a.id)} disabled={emailLoading===`sync-${a.id}`} title="Sync now">
+                      <button className="btn btn-ghost btn-sm" onClick={()=>triggerSync(a.id)} disabled={!a.can_manage || emailLoading===`sync-${a.id}`} title={a.can_manage ? 'Sync now' : 'Only the connector or an admin can sync this account'}>
                         <RefreshCw size={14} className={emailLoading===`sync-${a.id}`?'spin':''}/>
                       </button>
-                      <button className="btn btn-ghost btn-sm" onClick={()=>toggleAccount(a.id, !a.sync_enabled)} title={a.sync_enabled?'Pause':'Resume'}>
+                      <button className="btn btn-ghost btn-sm" onClick={()=>toggleAccount(a.id, !a.sync_enabled)} disabled={!a.can_manage} title={a.can_manage ? (a.sync_enabled?'Pause':'Resume') : 'Only the connector or an admin can manage this account'}>
                         {a.sync_enabled ? <PowerOff size={14}/> : <Power size={14}/>}
                       </button>
-                      <button className="btn btn-ghost btn-sm" onClick={()=>deleteAccount(a.id)} title="Remove" style={{color:'var(--danger)'}}><Trash2 size={14}/></button>
+                      <button className="btn btn-ghost btn-sm" onClick={()=>deleteAccount(a.id)} disabled={!a.can_manage} title={a.can_manage ? 'Remove' : 'Only the connector or an admin can remove this account'} style={{color:'var(--danger)'}}><Trash2 size={14}/></button>
                     </div>
                   </td>
                 </tr>
@@ -305,7 +317,7 @@ export default function Settings() {
         <div className="card" style={{marginBottom:16}}>
           <div className="card-header"><h3><Mail size={16} style={{verticalAlign:'middle',marginRight:6}}/>Connect Gmail Account</h3></div>
           <div className="card-body">
-            <p style={{fontSize:13,color:'var(--text-secondary)',marginBottom:12}}>Connect admin@52oldelvet.com via Google OAuth. The AI will scan the inbox, create maintenance issues, and place suggested replies in the Gmail Drafts folder when a reply is needed.</p>
+            <p style={{fontSize:13,color:'var(--text-secondary)',marginBottom:12}}>Connect the Gmail account you are currently logged into. FFR Property OS will keep it synced as a team context source; for admin@52oldelvet.com it will also place suggested replies in Gmail Drafts when a reply is needed.</p>
             <div style={{background:'rgba(99,102,241,0.06)',border:'1px solid rgba(99,102,241,0.15)',borderRadius:8,padding:'12px 14px',marginBottom:14,fontSize:12,color:'var(--text-secondary)',lineHeight:1.5}}>
               <strong style={{color:'var(--text-primary)'}}>Requires on Railway:</strong><br/>
               GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET env vars from <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noreferrer" style={{color:'var(--accent-light)'}}>Google Cloud Console</a><br/>
@@ -322,7 +334,7 @@ export default function Settings() {
         <div className="card" style={{marginBottom:16}}>
           <div className="card-header"><h3><Mail size={16} style={{verticalAlign:'middle',marginRight:6}}/>Connect IMAP Account (Zoho Mail)</h3></div>
           <div className="card-body">
-            <p style={{fontSize:13,color:'var(--text-secondary)',marginBottom:12}}>Connect info@psb.properties or any IMAP email account. Pre-configured for Zoho Mail. Use an App Password from Zoho for security.</p>
+            <p style={{fontSize:13,color:'var(--text-secondary)',marginBottom:12}}>Connect info@psb.properties or another IMAP email account as a long-running context source. Pre-configured for Zoho Mail. Use an App Password from Zoho for security.</p>
             <div style={{background:'rgba(99,102,241,0.06)',border:'1px solid rgba(99,102,241,0.15)',borderRadius:8,padding:'12px 14px',marginBottom:14,fontSize:12,color:'var(--text-secondary)',lineHeight:1.5}}>
               <strong style={{color:'var(--text-primary)'}}>Zoho App Password:</strong><br/>
               Go to <a href="https://accounts.zoho.com/home#security/security_pwd" target="_blank" rel="noreferrer" style={{color:'var(--accent-light)'}}>Zoho Account Security</a> &rarr; App Passwords &rarr; Generate new password for "PSB Maintenance Hub"

@@ -2,7 +2,7 @@ const express = require('express');
 const { getDb } = require('../database');
 const { authenticate, requireAdmin } = require('../middleware/auth');
 const { listAgents, getAgent } = require('../agents/registry');
-const { runCodexAgent, getCodexVersion } = require('../agents/core/codex-runner');
+const { runCodexAgent, getCodexStatus } = require('../agents/core/codex-runner');
 
 const router = express.Router();
 router.use(authenticate);
@@ -46,10 +46,12 @@ router.get('/', (req, res) => {
 });
 
 router.get('/health', async (req, res) => {
-  const version = await getCodexVersion();
+  const codex = await getCodexStatus();
   res.json({
-    codex_available: !!version,
-    codex_version: version,
+    codex_available: codex.available,
+    codex_version: codex.version,
+    codex_command: codex.command,
+    codex_diagnostics: codex,
     mode: process.env.CODEX_AGENT_MODE === 'execute' ? 'execute' : 'dry_run',
     sandbox: process.env.CODEX_AGENT_SANDBOX || 'read-only'
   });

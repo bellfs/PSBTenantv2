@@ -16,6 +16,13 @@ const OLD_ELVET_APARTMENTS = [
 const MIN_DIAGNOSIS_ROUNDS = 3;
 const CONVERSATION_GAP_MS = 10 * 60 * 60 * 1000; // 10 hours
 
+const STAFF_COPILOT_MEMBERS = [
+  { name: 'Fergus', emails: ['fergus@fiftytwo-group.com'], aliases: ['fergus', 'fergus bell'] },
+  { name: 'Andy', emails: ['andy@52oldelvet.com'], aliases: ['andy', 'andrew'] },
+  { name: 'Akiel', emails: ['akiel@52oldelvet.com'], aliases: ['akiel'] },
+  { name: 'Hannah', emails: ['hannah@52oldelvet.com'], aliases: ['hannah', 'hannah winn'] }
+];
+
 // Message deduplication cache (prevents duplicate webhook processing)
 const processedMessages = new Map();
 const DEDUP_TTL = 300000; // 5 minutes
@@ -77,6 +84,312 @@ async function downloadWhatsAppMedia(mediaId) {
     if (err.code === 'ECONNABORTED') console.error('[WhatsApp] Media download TIMED OUT for mediaId:', mediaId);
     return null;
   }
+}
+
+function truncate(value = '', max = 1200) {
+  const clean = String(value || '').replace(/\s+/g, ' ').trim();
+  return clean.length > max ? `${clean.slice(0, max - 1)}...` : clean;
+}
+
+function parseJsonObject(value) {
+  try {
+    const cleaned = String(value || '').trim().replace(/```json\s*/g, '').replace(/```\s*/g, '');
+    const start = cleaned.indexOf('{');
+    const end = cleaned.lastIndexOf('}');
+    if (start !== -1 && end !== -1) return JSON.parse(cleaned.slice(start, end + 1));
+    return JSON.parse(cleaned);
+  } catch {
+    return null;
+  }
+}
+
+function normalisePhone(phone = '') {
+  return String(phone || '').replace(/\D/g, '');
+}
+
+function parseNamedPhoneEntries(value = '') {
+  return String(value || '')
+    .split(/[\n,]+/)
+    .map(entry => entry.trim())
+    .filter(Boolean)
+    .map(entry => {
+      const [namePart, phonePart] = entry.includes(':') ? entry.split(':') : ['', entry];
+      return { name: namePart.trim(), phone: phonePart.trim() };
+    })
+    .filter(entry => entry.phone);
+}
+
+function staffMemberFromName(nameOrEmail = '') {
+  const value = String(nameOrEmail || '').toLowerCase();
+  return STAFF_COPILOT_MEMBERS.find(member =>
+    member.aliases.some(alias => value.includes(alias)) ||
+    member.emails.some(email => value.includes(email.toLowerCase()))
+  ) || null;
+}
+
+function getStaffCopilotMember(db, from, displayName) {
+  const fromNorm = normalisePhone(from);
+  if (!fromNorm) return null;
+
+  const staffRows = db.prepare('SELECT id, name, email, phone, role FROM staff WHERE active = 1').all();
+  for (const row of staffRows) {
+    if (row.phone && normalisePhone(row.phone) === fromNorm) {
+      const member = staffMemberFromName(`${row.name} ${row.email}`) || { name: row.name || row.email, emails: [row.email], aliases: [] };
+      return { ...member, staff_id: row.id, email: row.email, phone: from };
+    }
+  }
+
+  const setting = db.prepare("SELECT value FROM settings WHERE key = 'staff_notify_phones'").get()?.value || '';
+  const configured = [
+    ...parseNamedPhoneEntries(process.env.STAFF_COPILOT_PHONES || ''),
+    ...parseNamedPhoneEntries(setting)
+  ];
+  for (const entry of configured) {
+    if (normalisePhone(entry.phone) === fromNorm) {
+      const member = staffMemberFromName(entry.name) || { name: entry.name || 'Team member', emails: [], aliases: [] };
+      return { ...member, phone: from };
+    }
+  }
+
+  if (process.env.WHATSAPP_STAFF_NAME_FALLBACK !== 'false') {
+    const member = staffMemberFromName(displayName);
+    if (member) return { ...member, phone: from };
+  }
+  return null;
+}
+
+function incomingText(message) {
+  if (message.type === 'text') return message.text?.body || '';
+  if (message.type === 'image') return message.image?.caption || '[Photo sent]';
+  if (message.type === 'audio') return '[Voice note sent]';
+  if (message.type === 'document') return message.document?.caption || '[Document sent]';
+  return `[${message.type || 'message'} received]`;
+}
+
+function safeAll(db, sql, params = []) {
+  try { return db.prepare(sql).all(...params); } catch { return []; }
+}
+
+function readMemoryContext() {
+  const paths = [
+    'wiki/index.md',
+    'wiki/context/property-operating-facts.md',
+    'wiki/context/email-correspondence.md',
+    'wiki/context/durham-city.md',
+    'wiki/context/energy-contracts-and-suppliers.md',
+    'wiki/context/workmen-team-contractors.md',
+    'raw/recent-email.md',
+    'raw/recent-whatsapp.md',
+    'wiki/operations/tasks.md',
+    'wiki/operations/approvals.md'
+  ];
+  try {
+    const businessMemory = require('./business-memory');
+    return paths.map(filePath => {
+      try {
+        const file = businessMemory.readMemoryFile(filePath);
+        return `--- ${filePath} ---\n${truncate(file.content, 1800)}`;
+      } catch {
+        return null;
+      }
+    }).filter(Boolean).join('\n\n');
+  } catch {
+    return '';
+  }
+}
+
+function buildStaffCopilotContext(db) {
+  const openTasks = safeAll(db, `
+    SELECT title, domain, priority, assigned_to, due_date, created_at
+    FROM agent_tasks
+    WHERE status = 'open'
+    ORDER BY CASE priority WHEN 'urgent' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3 ELSE 4 END, created_at DESC
+    LIMIT 20
+  `);
+  const approvals = safeAll(db, `
+    SELECT title, summary, risk_level, created_at
+    FROM agent_approvals
+    WHERE status = 'pending'
+    ORDER BY created_at DESC
+    LIMIT 15
+  `);
+  const recentEmail = safeAll(db, `
+    SELECT subject, from_address, domain, priority, message_kind, is_automated, needs_reply, summary, created_at
+    FROM email_agent_items
+    ORDER BY created_at DESC
+    LIMIT 20
+  `);
+  const properties = safeAll(db, `
+    SELECT p.name, p.address, p.postcode, p.num_units,
+      COUNT(DISTINCT t.id) as tenant_count,
+      COUNT(DISTINCT CASE WHEN i.status NOT IN ('resolved','closed') THEN i.id END) as open_issues
+    FROM properties p
+    LEFT JOIN tenants t ON t.property_id = p.id
+    LEFT JOIN issues i ON i.property_id = p.id
+    GROUP BY p.id
+    ORDER BY p.name
+  `);
+  return {
+    openTasks,
+    approvals,
+    recentEmail,
+    properties,
+    memory: readMemoryContext()
+  };
+}
+
+async function handleStaffCopilotMessage(db, staffMember, from, displayName, message, textContent) {
+  const externalId = message.id || `staff-${from}-${Date.now()}`;
+  let intakeId = null;
+  try {
+    const result = db.prepare(`
+      INSERT OR IGNORE INTO intake_items (source_type, source_name, external_id, sender, occurred_at, content, raw_json, status, created_by)
+      VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, 'processed', ?)
+    `).run(
+      'whatsapp_staff_copilot',
+      'team_group_chat',
+      externalId,
+      staffMember.name || displayName || from,
+      textContent,
+      JSON.stringify({ from, displayName, staffMember, message }),
+      'whatsapp_staff_copilot'
+    );
+    intakeId = result.lastInsertRowid || db.prepare('SELECT id FROM intake_items WHERE source_type = ? AND external_id = ?').get('whatsapp_staff_copilot', externalId)?.id || null;
+  } catch (error) {
+    console.error('[StaffCopilot] Intake capture failed:', error.message);
+  }
+
+  const context = buildStaffCopilotContext(db);
+  let parsed = null;
+  try {
+    const prompt = `You are the FFR Property OS WhatsApp copilot for the internal team.
+
+You are speaking to ${staffMember.name || displayName}. They are not a tenant. They can ask questions, ask you to prepare work, or ask you to draft actions.
+
+Hard rules:
+- Do not resolve this as a tenant maintenance issue.
+- Do not actually send emails, approve spend, instruct contractors, or make legal/financial commitments from WhatsApp alone.
+- You may create internal tasks and approvals for review.
+- Use Business Memory to answer questions. If the answer is uncertain, say what data is missing.
+
+Staff message:
+"${textContent}"
+
+Current operating context:
+${JSON.stringify({
+  openTasks: context.openTasks,
+  approvals: context.approvals,
+  recentEmail: context.recentEmail,
+  properties: context.properties
+}, null, 2)}
+
+Business Memory snippets:
+${context.memory || 'No memory files are available yet.'}
+
+Return ONLY valid JSON:
+{
+  "response": "WhatsApp-ready response to the staff member",
+  "intent": "answer_question|create_task|draft_email|approval|status|other",
+  "should_create_task": false,
+  "task_title": "short task title",
+  "task_description": "task details",
+  "domain": "maintenance|finance|compliance|leasing|short_lets|utilities|contractors|operations|development",
+  "priority": "low|medium|high|urgent",
+  "assigned_to": "email or name if obvious",
+  "requires_approval": false,
+  "approval_title": "approval title",
+  "approval_summary": "approval summary",
+  "email_draft": {"to":"","subject":"","body":""},
+  "confidence": 0.0
+}`;
+
+    const result = await callLLM([{ role: 'user', content: prompt }], { maxTokens: 900 });
+    parsed = parseJsonObject(result);
+  } catch (error) {
+    console.error('[StaffCopilot] AI response failed:', error.message);
+  }
+
+  const actionWords = /\b(can you|please|create|add|chase|draft|send|email|remind|book|arrange|call|ask|check|follow up|follow-up|action)\b/i.test(textContent || '');
+  const domain = parsed?.domain || 'operations';
+  const priority = parsed?.priority || (/\burgent|asap|today|emergency\b/i.test(textContent || '') ? 'high' : 'medium');
+  let taskId = null;
+  let approvalId = null;
+
+  if (parsed?.should_create_task || (!parsed && actionWords)) {
+    const taskTitle = truncate(parsed?.task_title || `Staff WhatsApp: ${textContent}`, 140);
+    const taskDescription = parsed?.task_description || `Requested by ${staffMember.name || displayName} on WhatsApp.\n\n${textContent}`;
+    taskId = db.prepare(`
+      INSERT INTO agent_tasks (title, description, domain, priority, source, source_ref, assigned_to, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      taskTitle,
+      taskDescription,
+      domain,
+      priority,
+      'whatsapp_staff_copilot',
+      externalId,
+      parsed?.assigned_to || null,
+      staffMember.email || staffMember.name || displayName || 'whatsapp_staff'
+    ).lastInsertRowid;
+  }
+
+  const hasEmailDraft = parsed?.email_draft && (parsed.email_draft.to || parsed.email_draft.subject || parsed.email_draft.body);
+  if (parsed?.requires_approval || hasEmailDraft) {
+    approvalId = db.prepare(`
+      INSERT INTO agent_approvals (task_id, action_type, title, summary, payload_json, risk_level, requested_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      taskId,
+      hasEmailDraft ? 'draft_or_send_email_from_whatsapp' : 'staff_whatsapp_action',
+      parsed?.approval_title || parsed?.task_title || 'Review staff WhatsApp action',
+      parsed?.approval_summary || parsed?.response || textContent,
+      JSON.stringify({ staff: staffMember, message: textContent, email_draft: parsed?.email_draft || null, intake_id: intakeId }),
+      ['finance', 'compliance'].includes(domain) ? 'high' : 'medium',
+      staffMember.email || staffMember.name || displayName || 'whatsapp_staff'
+    ).lastInsertRowid;
+  }
+
+  if (intakeId) {
+    db.prepare(`
+      INSERT INTO intake_extractions (intake_item_id, extraction_type, title, summary, domain, priority, confidence, status, agent_key, risk_level, payload_json, task_id, approval_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      intakeId,
+      parsed?.intent || 'staff_copilot',
+      parsed?.task_title || truncate(textContent, 120),
+      parsed?.response || 'Staff copilot message captured.',
+      domain,
+      priority,
+      Number(parsed?.confidence || 0),
+      taskId ? 'task_created' : approvalId ? 'approval_created' : 'captured',
+      'staff_whatsapp_copilot',
+      approvalId ? 'medium' : 'low',
+      JSON.stringify({ parsed, staff: staffMember }),
+      taskId,
+      approvalId
+    );
+  }
+
+  db.prepare(`
+    INSERT INTO agent_events (event_type, domain, source, source_ref, actor, payload_json)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(
+    'staff_whatsapp_copilot',
+    domain,
+    'whatsapp_staff_copilot',
+    externalId,
+    staffMember.email || staffMember.name || displayName || 'whatsapp_staff',
+    JSON.stringify({ task_id: taskId, approval_id: approvalId, intent: parsed?.intent || 'fallback' })
+  );
+
+  const response = parsed?.response || (taskId
+    ? `Logged that as task #${taskId}. I will keep it in FFR OS for the team to pick up.`
+    : `I have captured that in FFR OS. I could not get a full AI answer just now, but the message is in Business Memory context.`);
+  const suffix = [
+    taskId ? `Task #${taskId} created.` : '',
+    approvalId ? `Approval #${approvalId} queued.` : ''
+  ].filter(Boolean).join(' ');
+  await sendWhatsAppMessage(from, truncate(`${response}${suffix ? `\n\n${suffix}` : ''}`, 3500));
 }
 
 // ============================================================
@@ -147,14 +460,26 @@ async function processIncomingMessage(webhookData) {
         console.log(`[WhatsApp] Message ${whatsappMessageId} already in DB, skipping`);
         return;
       }
+      const existingStaffIntake = db.prepare("SELECT id FROM intake_items WHERE source_type = 'whatsapp_staff_copilot' AND external_id = ?").get(whatsappMessageId);
+      if (existingStaffIntake) {
+        console.log(`[WhatsApp] Staff copilot message ${whatsappMessageId} already in DB, skipping`);
+        return;
+      }
     }
 
     const contact = value.contacts?.[0];
     const from = message.from;
     const displayName = contact?.profile?.name || 'Unknown';
     const messageType = message.type;
+    let textContent = incomingText(message);
 
     console.log(`[WhatsApp] ${messageType} from ${from} (${displayName})`);
+
+    const staffMember = getStaffCopilotMember(db, from, displayName);
+    if (staffMember) {
+      await handleStaffCopilotMessage(db, staffMember, from, displayName, message, textContent);
+      return;
+    }
 
     let tenant = db.prepare('SELECT * FROM tenants WHERE phone = ? OR whatsapp_id = ?').get(from, from);
     if (!tenant) {
@@ -170,7 +495,6 @@ async function processIncomingMessage(webhookData) {
       return;
     }
 
-    let textContent = '';
     let imageData = null;
 
     if (messageType === 'text') {

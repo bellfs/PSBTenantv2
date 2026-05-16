@@ -152,6 +152,12 @@ async function initialiseDatabase() {
     id INTEGER PRIMARY KEY AUTOINCREMENT, provider TEXT NOT NULL,
     email_address TEXT NOT NULL, credentials TEXT,
     last_sync_at DATETIME, sync_enabled INTEGER DEFAULT 1,
+    connected_by_staff_id INTEGER,
+    connected_by_email TEXT,
+    connected_by_name TEXT,
+    connection_scope TEXT DEFAULT 'team_context',
+    sync_window_days INTEGER DEFAULT 30,
+    last_context_at DATETIME,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`);
 
@@ -177,12 +183,16 @@ async function initialiseDatabase() {
     issue_id INTEGER,
     domain TEXT DEFAULT 'operations',
     priority TEXT DEFAULT 'medium',
+    message_kind TEXT DEFAULT 'correspondence',
+    is_automated INTEGER DEFAULT 0,
+    classification_source TEXT DEFAULT 'heuristic',
     status TEXT DEFAULT 'new',
     needs_reply INTEGER DEFAULT 0,
     needs_team_followup INTEGER DEFAULT 0,
     suggested_owner TEXT,
     summary TEXT,
     action_json TEXT,
+    memory_refs_json TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (email_account_id) REFERENCES email_accounts(id),
@@ -288,9 +298,11 @@ async function initialiseDatabase() {
   db.exec('CREATE INDEX IF NOT EXISTS idx_documents_tenant ON documents(tenant_id)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_tenants_email ON tenants(email)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_email_sync_msg ON email_sync_log(message_id)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_email_accounts_owner ON email_accounts(connected_by_staff_id, connected_by_email)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_email_agent_items_message ON email_agent_items(message_id)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_email_agent_items_status ON email_agent_items(status)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_email_agent_items_domain ON email_agent_items(domain)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_email_agent_items_kind ON email_agent_items(message_kind, is_automated)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_email_agent_drafts_status ON email_agent_drafts(status)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_email_agent_reports_date ON email_agent_reports(report_date)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_calendar_events_start ON calendar_events(start_at)');
@@ -673,6 +685,16 @@ async function initialiseDatabase() {
     ['inspections','cleaning_standard','ALTER TABLE inspections ADD COLUMN cleaning_standard TEXT'],
     ['email_agent_drafts','gmail_thread_id','ALTER TABLE email_agent_drafts ADD COLUMN gmail_thread_id TEXT'],
     ['email_agent_drafts','gmail_draft_status','ALTER TABLE email_agent_drafts ADD COLUMN gmail_draft_status TEXT'],
+    ['email_accounts','connected_by_staff_id','ALTER TABLE email_accounts ADD COLUMN connected_by_staff_id INTEGER'],
+    ['email_accounts','connected_by_email','ALTER TABLE email_accounts ADD COLUMN connected_by_email TEXT'],
+    ['email_accounts','connected_by_name','ALTER TABLE email_accounts ADD COLUMN connected_by_name TEXT'],
+    ['email_accounts','connection_scope','ALTER TABLE email_accounts ADD COLUMN connection_scope TEXT DEFAULT \'team_context\''],
+    ['email_accounts','sync_window_days','ALTER TABLE email_accounts ADD COLUMN sync_window_days INTEGER DEFAULT 30'],
+    ['email_accounts','last_context_at','ALTER TABLE email_accounts ADD COLUMN last_context_at DATETIME'],
+    ['email_agent_items','message_kind','ALTER TABLE email_agent_items ADD COLUMN message_kind TEXT DEFAULT \'correspondence\''],
+    ['email_agent_items','is_automated','ALTER TABLE email_agent_items ADD COLUMN is_automated INTEGER DEFAULT 0'],
+    ['email_agent_items','classification_source','ALTER TABLE email_agent_items ADD COLUMN classification_source TEXT DEFAULT \'heuristic\''],
+    ['email_agent_items','memory_refs_json','ALTER TABLE email_agent_items ADD COLUMN memory_refs_json TEXT'],
   ];
   for (const [t,c,s] of cols) {
     try { db.prepare(`SELECT ${c} FROM ${t} LIMIT 0`).all(); } catch(e) {
@@ -688,7 +710,7 @@ async function initialiseDatabase() {
   }
 
   // Seed team
-  for (const [name, email] of [['Hannah Winn','hannah@52oldelvet.com'],['Andy Turns','andy@52oldelvet.com'],['Akiel Mahmood','akiel@52oldelvet.com']]) {
+  for (const [name, email] of [['Fergus Bell','fergus@fiftytwo-group.com'],['Hannah Winn','hannah@52oldelvet.com'],['Andy Turns','andy@52oldelvet.com'],['Akiel Mahmood','akiel@52oldelvet.com']]) {
     if (!db.prepare('SELECT id FROM staff WHERE email = ?').get(email)) {
       db.prepare('INSERT INTO staff (name, email, password_hash, role) VALUES (?, ?, ?, ?)').run(name, email, bcrypt.hashSync('psb2026!', 10), 'maintenance');
       console.log(`  Team member created: ${name}`);

@@ -115,7 +115,7 @@ function collectTableCounts(db) {
     'properties', 'tenants', 'tenancies', 'staff', 'issues', 'messages', 'contractors', 'quotes',
     'compliance_certificates', 'documents', 'meter_readings', 'utility_rates', 'utility_alerts', 'fair_usage_limits',
     'bank_transactions', 'inspections', 'intake_items', 'intake_extractions',
-    'email_agent_items', 'email_agent_drafts', 'email_agent_reports',
+    'email_accounts', 'email_agent_items', 'email_agent_drafts', 'email_agent_reports',
     'agent_tasks', 'agent_approvals', 'agent_events', 'agent_runs'
   ];
   return tables.map(table => ({ table, count: safeScalar(db, `SELECT COUNT(*) as count FROM ${table}`) }));
@@ -337,9 +337,21 @@ function collectData() {
       ORDER BY e.created_at DESC
       LIMIT ?
     `, [DEFAULT_LIMITS.recentRows]);
+    const emailAccounts = safeAll(db, `
+      SELECT ea.id, ea.provider, ea.email_address, ea.last_sync_at, ea.last_context_at, ea.sync_enabled,
+        ea.connected_by_email, ea.connected_by_name, ea.connection_scope, ea.sync_window_days, ea.created_at,
+        (SELECT COUNT(*) FROM email_agent_items eai WHERE eai.email_account_id = ea.id) as item_count,
+        (SELECT COUNT(*) FROM email_agent_items eai WHERE eai.email_account_id = ea.id AND eai.needs_reply = 1) as needs_reply_count,
+        (SELECT COUNT(*) FROM email_agent_items eai WHERE eai.email_account_id = ea.id AND eai.is_automated = 1) as automated_count
+      FROM email_accounts ea
+      ORDER BY ea.created_at DESC
+    `);
     const emailItems = safeAll(db, `
-      SELECT eai.*, t.name as tenant_name, i.uuid as issue_uuid, i.title as issue_title
+      SELECT eai.*, ea.email_address as account_email, ea.provider as account_provider,
+        ea.connected_by_email, ea.connected_by_name,
+        t.name as tenant_name, i.uuid as issue_uuid, i.title as issue_title
       FROM email_agent_items eai
+      LEFT JOIN email_accounts ea ON ea.id = eai.email_account_id
       LEFT JOIN tenants t ON t.id = eai.matched_tenant_id
       LEFT JOIN issues i ON i.id = eai.issue_id
       ORDER BY eai.created_at DESC
@@ -419,6 +431,7 @@ function collectData() {
       inspections,
       intakeItems,
       intakeExtractions,
+      emailAccounts,
       emailItems,
       emailDrafts,
       emailReports,
@@ -648,7 +661,7 @@ function buildAgentsReadme(generatedAt) {
 Use this filesystem as business context before acting inside FFR Property OS.
 
 1. Start with \`wiki/index.md\` and \`INDEX.json\`.
-2. Read \`wiki/context/property-operating-facts.md\`, \`wiki/context/durham-city.md\`, \`wiki/context/energy-contracts-and-suppliers.md\` and \`wiki/context/workmen-team-contractors.md\` before property, supplier or contractor work.
+2. Read \`wiki/context/property-operating-facts.md\`, \`wiki/context/durham-city.md\`, \`wiki/context/email-correspondence.md\`, \`wiki/context/energy-contracts-and-suppliers.md\` and \`wiki/context/workmen-team-contractors.md\` before property, supplier, contractor or correspondence work.
 3. Treat SQLite, connected inboxes and uploaded documents as canonical where there is a conflict.
 4. Cite source ids, file paths, task ids, issue ids and email message ids in any recommendation.
 5. Do not send messages, approve spend, alter rent/deposit positions or instruct contractors without a platform approval.
@@ -1480,22 +1493,68 @@ ${table(data.bankTransactions.slice(0, 120), [
 }
 
 function buildEmailPage(data, generatedAt) {
+  const automatedItems = data.emailItems.filter(item => Number(item.is_automated) === 1 || ['notification', 'automated'].includes(value(item.message_kind)));
+  const shortLetItems = data.emailItems.filter(item => item.domain === 'short_lets' || /airbnb|booking\.com|expedia|vrbo|guest/i.test(`${item.from_address || ''} ${item.subject || ''} ${item.summary || ''}`));
   return `${frontmatter({
     title: 'Email Memory',
     type: 'comms_email',
     generated_at: generatedAt
   })}# Email Memory
 
+## Connected Email Accounts
+
+These inboxes are long-running context sources. They feed task detection, draft creation and the compiled Business Memory filesystem.
+
+${table(data.emailAccounts, [
+    { label: 'Account', value: 'email_address' },
+    { label: 'Provider', value: 'provider' },
+    { label: 'Connected by', value: row => row.connected_by_name || row.connected_by_email || 'Team account' },
+    { label: 'Sync', value: row => row.sync_enabled ? 'Active' : 'Paused' },
+    { label: 'Window days', value: 'sync_window_days' },
+    { label: 'Last sync', value: 'last_sync_at' },
+    { label: 'Items', value: 'item_count' },
+    { label: 'Automated', value: 'automated_count' },
+    { label: 'Needs reply', value: 'needs_reply_count' }
+  ])}
+
 ## Recent Email Agent Items
 
 ${table(data.emailItems, [
     { label: 'Created', value: 'created_at' },
+    { label: 'Account', value: 'account_email', max: 180 },
     { label: 'From', value: row => row.from_name ? `${row.from_name} <${row.from_address}>` : row.from_address, max: 220 },
     { label: 'Subject', value: 'subject', max: 240 },
     { label: 'Domain', value: 'domain' },
+    { label: 'Kind', value: 'message_kind' },
+    { label: 'Automated', value: row => row.is_automated ? 'Yes' : 'No' },
     { label: 'Priority', value: 'priority' },
     { label: 'Needs reply', value: row => row.needs_reply ? 'Yes' : 'No' },
+    { label: 'Follow-up', value: row => row.needs_team_followup ? 'Yes' : 'No' },
     { label: 'Summary', value: 'summary', max: 320 }
+  ])}
+
+## Automated Notifications
+
+${table(automatedItems.slice(0, 120), [
+    { label: 'Created', value: 'created_at' },
+    { label: 'Account', value: 'account_email', max: 180 },
+    { label: 'From', value: 'from_address', max: 200 },
+    { label: 'Subject', value: 'subject', max: 260 },
+    { label: 'Domain', value: 'domain' },
+    { label: 'Kind', value: 'message_kind' },
+    { label: 'Summary', value: 'summary', max: 340 }
+  ])}
+
+## Short-Let Channel Context
+
+${table(shortLetItems.slice(0, 120), [
+    { label: 'Created', value: 'created_at' },
+    { label: 'Channel/from', value: row => row.from_name ? `${row.from_name} <${row.from_address}>` : row.from_address, max: 220 },
+    { label: 'Subject', value: 'subject', max: 260 },
+    { label: 'Priority', value: 'priority' },
+    { label: 'Kind', value: 'message_kind' },
+    { label: 'Follow-up', value: row => row.needs_team_followup ? 'Yes' : 'No' },
+    { label: 'Summary', value: 'summary', max: 340 }
   ])}
 
 ## Drafts
@@ -1516,6 +1575,84 @@ ${table(data.emailReports, [
     { label: 'Subject', value: 'subject' },
     { label: 'Status', value: 'status' },
     { label: 'Sent', value: 'sent_at' }
+  ])}
+`;
+}
+
+function buildEmailCorrespondenceContextPage(data, generatedAt) {
+  const tasks = data.emailItems.filter(item => item.needs_team_followup || item.message_kind === 'task' || item.message_kind === 'reply_needed');
+  const notifications = data.emailItems.filter(item => Number(item.is_automated) === 1 || item.message_kind === 'notification' || item.message_kind === 'automated');
+  const replyNeeded = data.emailItems.filter(item => item.needs_reply);
+  const shortLets = data.emailItems.filter(item => item.domain === 'short_lets' || /airbnb|booking\.com|expedia|vrbo|guest/i.test(`${item.from_address || ''} ${item.subject || ''} ${item.summary || ''}`));
+
+  return `${frontmatter({
+    title: 'Email Correspondence Context',
+    type: 'email_correspondence_context',
+    generated_at: generatedAt
+  })}# Email Correspondence Context
+
+This context file helps agents understand what correspondence means before they create tasks or draft replies.
+
+## Classification Rules
+
+- Human requests, direct questions, complaints, chases, approvals and anything requiring judgement should become tasks or reply-needed items.
+- Automated platform emails, statements, receipts, alerts and status notifications should usually enrich memory without creating work unless the content says something needs action.
+- Airbnb, Booking.com, Expedia, VRBO and similar messages should be treated as short-let context for 52 Old Elvet, 2 St Margarets Mews, 35 St Andrews Court or 7 Cathedrals unless the message points elsewhere.
+- Financial, compliance, legal, refund, deposit, bank, licence and safety emails need human approval before external action.
+- Draft replies are created for the managed admin inbox when the agent decides a reply is needed; other connected inboxes primarily enrich shared context.
+
+## Connected Accounts
+
+${table(data.emailAccounts, [
+    { label: 'Email', value: 'email_address' },
+    { label: 'Provider', value: 'provider' },
+    { label: 'Connected by', value: row => row.connected_by_name || row.connected_by_email || 'Team account' },
+    { label: 'Context scope', value: 'connection_scope' },
+    { label: 'Last context', value: row => row.last_context_at || row.last_sync_at || '' }
+  ])}
+
+## Reply Needed
+
+${table(replyNeeded.slice(0, 80), [
+    { label: 'Created', value: 'created_at' },
+    { label: 'Account', value: 'account_email' },
+    { label: 'From', value: 'from_address', max: 220 },
+    { label: 'Subject', value: 'subject', max: 260 },
+    { label: 'Owner', value: 'suggested_owner' },
+    { label: 'Summary', value: 'summary', max: 340 }
+  ])}
+
+## Tasks from Correspondence
+
+${table(tasks.slice(0, 100), [
+    { label: 'Created', value: 'created_at' },
+    { label: 'Domain', value: 'domain' },
+    { label: 'Kind', value: 'message_kind' },
+    { label: 'Priority', value: 'priority' },
+    { label: 'Subject', value: 'subject', max: 260 },
+    { label: 'Owner', value: 'suggested_owner' },
+    { label: 'Summary', value: 'summary', max: 340 }
+  ])}
+
+## Notifications for Memory Only
+
+${table(notifications.slice(0, 100), [
+    { label: 'Created', value: 'created_at' },
+    { label: 'Domain', value: 'domain' },
+    { label: 'Subject', value: 'subject', max: 260 },
+    { label: 'From', value: 'from_address', max: 220 },
+    { label: 'Summary', value: 'summary', max: 340 }
+  ])}
+
+## Short-Let Channels
+
+${table(shortLets.slice(0, 100), [
+    { label: 'Created', value: 'created_at' },
+    { label: 'Subject', value: 'subject', max: 260 },
+    { label: 'From', value: 'from_address', max: 220 },
+    { label: 'Kind', value: 'message_kind' },
+    { label: 'Follow-up', value: row => row.needs_team_followup ? 'Yes' : 'No' },
+    { label: 'Summary', value: 'summary', max: 340 }
   ])}
 `;
 }
@@ -1640,7 +1777,10 @@ ${section('New or Updated Tasks', table(todayTasks.slice(0, 30), [
 
 ${section('Email', table(todayEmail.slice(0, 30), [
     { label: 'Subject', value: 'subject', max: 240 },
+    { label: 'Account', value: 'account_email' },
     { label: 'From', value: 'from_address' },
+    { label: 'Kind', value: 'message_kind' },
+    { label: 'Automated', value: row => row.is_automated ? 'Yes' : 'No' },
     { label: 'Needs reply', value: row => row.needs_reply ? 'Yes' : 'No' },
     { label: 'Summary', value: 'summary', max: 320 }
   ]))}
@@ -1731,6 +1871,7 @@ function snapshotBusinessMemory(options = {}) {
       { type: 'context', id: 'property-operating-facts', title: 'Property Operating Facts', path: 'wiki/context/property-operating-facts.md' },
       { type: 'context', id: 'durham-city', title: 'Durham City Operating Context', path: 'wiki/context/durham-city.md' },
       { type: 'context', id: 'st-andrews-court', title: '35 St Andrews Court Deep Context', path: 'wiki/context/st-andrews-court.md' },
+      { type: 'context', id: 'email-correspondence', title: 'Email Correspondence Context', path: 'wiki/context/email-correspondence.md' },
       { type: 'context', id: 'energy-contracts-and-suppliers', title: 'Energy Contracts and Suppliers', path: 'wiki/context/energy-contracts-and-suppliers.md' },
       { type: 'context', id: 'workmen-team-contractors', title: 'Workmen Team and Contractors', path: 'wiki/context/workmen-team-contractors.md' }
     );
@@ -1739,6 +1880,7 @@ function snapshotBusinessMemory(options = {}) {
     bytesWritten += writeFile(root, 'wiki/context/property-operating-facts.md', buildPropertyFactsPage(data, generatedAt), writtenFiles);
     bytesWritten += writeFile(root, 'wiki/context/durham-city.md', buildDurhamContextPage(data, generatedAt), writtenFiles);
     bytesWritten += writeFile(root, 'wiki/context/st-andrews-court.md', buildStAndrewsContextPage(data, generatedAt), writtenFiles);
+    bytesWritten += writeFile(root, 'wiki/context/email-correspondence.md', buildEmailCorrespondenceContextPage(data, generatedAt), writtenFiles);
     bytesWritten += writeFile(root, 'wiki/context/energy-contracts-and-suppliers.md', buildEnergySuppliersPage(data, generatedAt), writtenFiles);
     bytesWritten += writeFile(root, 'wiki/context/workmen-team-contractors.md', buildWorkmenTeamPage(data, generatedAt), writtenFiles);
 
