@@ -7,6 +7,7 @@ import Agents from './pages/Agents';
 import Intake from './pages/Intake';
 import EmailAgent from './pages/EmailAgent';
 import BusinessMemory from './pages/BusinessMemory';
+import TeamHome from './pages/TeamHome';
 import Dashboard from './pages/Dashboard';
 import Issues from './pages/Issues';
 import IssueDetail from './pages/IssueDetail';
@@ -53,7 +54,8 @@ export default function App() {
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
-            <Route index element={<Dashboard />} />
+            <Route index element={<TeamHome />} />
+            <Route path="dashboard" element={<Dashboard />} />
             <Route path="os" element={<OSOverview />} />
             <Route path="agents" element={<Agents />} />
             <Route path="intake" element={<Intake />} />

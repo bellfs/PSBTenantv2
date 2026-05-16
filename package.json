@@ -10,6 +10,11 @@
     "setup": "node server/setup.js",
     "build": "cd client && npm install --include=dev && npm run build",
     "start": "node server/index.js",
+    "desktop:dev": "npm run build && electron desktop/main.cjs",
+    "desktop:pack:mac": "npm run build && electron-builder --mac dir",
+    "desktop:zip:mac": "npm run desktop:pack:mac && node desktop/zip-mac.cjs",
+    "desktop:dist:mac": "npm run build && electron-builder --mac dmg",
+    "desktop:rebuild": "electron-builder install-app-deps",
     "agent": "node scripts/ffr-agent.js",
     "agent:list": "node scripts/ffr-agent.js list",
     "agent:health": "node scripts/ffr-agent.js health"
@@ -30,5 +35,33 @@
     "mailparser": "^3.6.5",
     "uuid": "^9.0.0",
     "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "electron": "^31.7.7",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.ffrgroup.propertyos",
+    "productName": "FFR Property OS",
+    "asar": false,
+    "files": [
+      "desktop/**/*",
+      "server/**/*",
+      "client/dist/**/*",
+      "package.json",
+      "node_modules/**/*"
+    ],
+    "extraMetadata": {
+      "main": "desktop/main.cjs"
+    },
+    "mac": {
+      "category": "public.app-category.business",
+      "target": [
+        "dmg"
+      ]
+    },
+    "dmg": {
+      "artifactName": "FFR-Property-OS-${version}-${arch}.dmg"
+    }
   }
 }

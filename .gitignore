@@ -6,6 +6,7 @@ server/data/business-memory/
 server/uploads/*
 !server/uploads/.gitkeep
 client/dist/
+dist/
 .DS_Store
 *.log
 .claude/

@@ -118,6 +118,7 @@ export const api = {
   askCopilot: (question, history) => request('/copilot/ask', { method: 'POST', body: JSON.stringify({ question, history }) }),
 
   // FFR Property OS
+  getToday: () => request('/os/today'),
   getOSOverview: () => request('/os/overview'),
   getAgents: () => request('/agents'),
   getAgentHealth: () => request('/agents/health'),
@@ -153,6 +154,12 @@ export const api = {
   snapshotBusinessMemory: () => request('/business-memory/snapshot', { method: 'POST' }),
   getBusinessMemoryFiles: () => request('/business-memory/files'),
   getBusinessMemoryFile: (path) => request(`/business-memory/file?path=${encodeURIComponent(path)}`),
+
+  // Google Calendar
+  getCalendarAccounts: () => request('/calendar/accounts'),
+  getGoogleCalendarAuthUrl: () => request('/calendar/google/auth-url', { method: 'POST' }),
+  syncCalendars: () => request('/calendar/sync', { method: 'POST' }),
+  getCalendarEvents: (limit = 25) => request(`/calendar/events?limit=${limit}`),
 
   // Inspections (Check-In / Check-Out)
   getInspections: (params = {}) => { const qs = new URLSearchParams(params).toString(); return request(`/inspections?${qs}`); },

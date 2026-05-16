@@ -228,6 +228,36 @@ async function initialiseDatabase() {
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`);
 
+  db.exec(`CREATE TABLE IF NOT EXISTS calendar_accounts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    provider TEXT NOT NULL DEFAULT 'google',
+    email_address TEXT NOT NULL,
+    calendar_id TEXT DEFAULT 'primary',
+    credentials TEXT NOT NULL,
+    sync_enabled INTEGER DEFAULT 1,
+    last_sync_at DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(provider, email_address, calendar_id)
+  )`);
+
+  db.exec(`CREATE TABLE IF NOT EXISTS calendar_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    calendar_account_id INTEGER NOT NULL,
+    google_event_id TEXT NOT NULL,
+    calendar_id TEXT DEFAULT 'primary',
+    summary TEXT,
+    description TEXT,
+    location TEXT,
+    start_at DATETIME,
+    end_at DATETIME,
+    html_link TEXT,
+    status TEXT,
+    raw_json TEXT,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (calendar_account_id) REFERENCES calendar_accounts(id) ON DELETE CASCADE,
+    UNIQUE(calendar_account_id, google_event_id)
+  )`);
+
   db.exec(`CREATE TABLE IF NOT EXISTS compliance_certificates (
     id INTEGER PRIMARY KEY AUTOINCREMENT, property_id INTEGER NOT NULL,
     cert_type TEXT NOT NULL, certificate_number TEXT,
@@ -263,6 +293,8 @@ async function initialiseDatabase() {
   db.exec('CREATE INDEX IF NOT EXISTS idx_email_agent_items_domain ON email_agent_items(domain)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_email_agent_drafts_status ON email_agent_drafts(status)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_email_agent_reports_date ON email_agent_reports(report_date)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_calendar_events_start ON calendar_events(start_at)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_calendar_events_account ON calendar_events(calendar_account_id)');
 
   // ===== UTILITIES MANAGEMENT TABLES =====
   db.exec(`CREATE TABLE IF NOT EXISTS meter_readings (

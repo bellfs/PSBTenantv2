@@ -7,6 +7,13 @@ import CopilotPanel from './CopilotPanel';
 // Page-contextual placeholder suggestions that rotate
 const PAGE_SUGGESTIONS = {
   '/': [
+    'What needs attention today?',
+    'Which replies are waiting?',
+    'Show urgent maintenance',
+    'What approvals need review?',
+    'What is due today?',
+  ],
+  '/dashboard': [
     'How many open issues do we have?',
     'Total spend this month?',
     'Which property has the most issues?',
@@ -186,33 +193,33 @@ export default function Layout() {
 
   const navLinks = (
     <>
-      <NavSection label="Command">
-        <SidebarLink to="/" end icon={LayoutDashboard} label="Dashboard" />
-        <SidebarLink to="/os" icon={Workflow} label="FFR OS" />
-        <SidebarLink to="/email-agent" icon={MailCheck} label="Email Agent" />
-        <SidebarLink to="/intake" icon={Inbox} label="Intake" />
-        <SidebarLink to="/business-memory" icon={Database} label="Business Memory" />
-        <SidebarLink to="/agents" icon={Bot} label="Agents" />
+      <NavSection label="Start Here">
+        <SidebarLink to="/" end icon={LayoutDashboard} label="Today" />
+        <SidebarLink to="/email-agent" icon={MailCheck} label="Email & Drafts" />
+        <SidebarLink to="/issues" icon={AlertCircle} label="Maintenance" />
+        <SidebarLink to="/agents" icon={Bot} label="Tasks & Approvals" />
       </NavSection>
 
-      <NavSection label="Property Work">
-        <SidebarLink to="/issues" icon={AlertCircle} label="Issues" />
+      <NavSection label="People & Places">
         <SidebarLink to="/properties" icon={Building2} label="Properties" />
         <SidebarLink to="/tenants" icon={Users} label="Tenants" />
+        <SidebarLink to="/contractors" icon={HardHat} label="Contractors" />
       </NavSection>
 
-      <NavSection label="Operations">
-        <SidebarLink to="/contractors" icon={HardHat} label="Contractors" />
+      <NavSection label="Business Control">
         <SidebarLink to="/compliance" icon={ShieldCheck} label="Compliance" />
         <SidebarLink to="/finance" icon={Landmark} label="Finance" />
         <SidebarLink to="/utilities" icon={Zap} label="Utilities" />
       </NavSection>
 
-      <NavSection label="Records">
+      <NavSection label="More Tools">
+        <SidebarLink to="/intake" icon={Inbox} label="WhatsApp Intake" />
+        <SidebarLink to="/business-memory" icon={Database} label="Business Memory" />
+        <SidebarLink to="/os" icon={Workflow} label="FFR OS" />
+        <SidebarLink to="/dashboard" icon={BarChart3} label="Analytics" />
         <SidebarLink to="/check-ins" icon={ClipboardCheck} label="Check-In" />
         <SidebarLink to="/check-outs" icon={ClipboardList} label="Check-Out" />
         <SidebarLink to="/timeline" icon={CalendarRange} label="Timeline" />
-        <SidebarLink to="/analytics" icon={BarChart3} label="Analytics" />
         {user?.role === 'admin' && <SidebarLink to="/settings" icon={Settings} label="Settings" />}
       </NavSection>
     </>
