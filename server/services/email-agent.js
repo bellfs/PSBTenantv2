@@ -127,6 +127,203 @@ function isNoReplyAddress(email = '') {
   return /(^|[._-])(no-?reply|donotreply|noreply|notifications?|alerts?)([._-]|@)/i.test(email);
 }
 
+function isLikelyAutomatedEmail(fromEmail = '', subject = '', body = '') {
+  const from = String(fromEmail || '').toLowerCase();
+  const text = `${subject}\n${body}`.toLowerCase();
+  return isNoReplyAddress(from) ||
+    /(mailer-daemon|postmaster|calendar-notification|drive-shares|notifications?@|alerts?@)/i.test(from) ||
+    /(newsletter|unsubscribe|do not reply|automated message|security alert|delivery status notification)/i.test(text);
+}
+
+function buildNameSearchTerms(fromName = '', tenant = null) {
+  const terms = new Set();
+  for (const value of [fromName, tenant?.name]) {
+    String(value || '').split(/\s+/).forEach(part => {
+      const clean = part.replace(/[^a-z0-9'-]/gi, '').trim();
+      if (clean.length >= 3) terms.add(clean);
+    });
+  }
+  if (tenant?.email) terms.add(tenant.email);
+  return Array.from(terms).slice(0, 4);
+}
+
+function queryAll(db, sql, params = []) {
+  try {
+    return db.prepare(sql).all(...params);
+  } catch (error) {
+    return [];
+  }
+}
+
+function buildBusinessMemory(db, { messageId, fromEmail, fromName, tenant, issue, classification }) {
+  const tenantId = tenant?.id || null;
+  const propertyId = tenant?.property_id || issue?.property_id || null;
+  const issueId = issue?.id || null;
+  const nameTerms = buildNameSearchTerms(fromName, tenant);
+  const nameClauses = nameTerms.map(() => '(LOWER(i.sender) LIKE ? OR LOWER(i.content) LIKE ?)').join(' OR ');
+  const nameParams = nameTerms.flatMap(term => [`%${term.toLowerCase()}%`, `%${term.toLowerCase()}%`]);
+
+  const previousEmails = queryAll(db, `
+    SELECT subject, summary, domain, priority, status, created_at
+    FROM email_agent_items
+    WHERE message_id != ? AND LOWER(COALESCE(from_address, '')) = LOWER(?)
+    ORDER BY created_at DESC
+    LIMIT 8
+  `, [messageId, fromEmail || '']);
+
+  const previousEmailLogs = queryAll(db, `
+    SELECT from_address, subject, matched_tenant_id, issue_id, status, processed_at
+    FROM email_sync_log
+    WHERE message_id != ?
+      AND (
+        LOWER(COALESCE(from_address, '')) = LOWER(?)
+        OR (? IS NOT NULL AND matched_tenant_id = ?)
+        OR (? IS NOT NULL AND issue_id = ?)
+      )
+    ORDER BY processed_at DESC
+    LIMIT 12
+  `, [messageId, fromEmail || '', tenantId, tenantId, issueId, issueId]);
+
+  const tenantEmails = tenantId ? queryAll(db, `
+    SELECT subject, summary, domain, priority, status, created_at
+    FROM email_agent_items
+    WHERE message_id != ? AND matched_tenant_id = ?
+    ORDER BY created_at DESC
+    LIMIT 8
+  `, [messageId, tenantId]) : [];
+
+  const domainEmails = queryAll(db, `
+    SELECT subject, summary, domain, priority, status, created_at
+    FROM email_agent_items
+    WHERE message_id != ? AND domain = ?
+    ORDER BY created_at DESC
+    LIMIT 5
+  `, [messageId, classification.domain]);
+
+  const relatedIssues = queryAll(db, `
+    SELECT i.id, i.uuid, i.title, i.status, i.priority, i.category, i.created_at, i.updated_at, p.name as property_name
+    FROM issues i
+    LEFT JOIN properties p ON p.id = i.property_id
+    WHERE (? IS NOT NULL AND i.tenant_id = ?)
+       OR (? IS NOT NULL AND i.property_id = ?)
+       OR (? IS NOT NULL AND i.id = ?)
+    ORDER BY CASE i.status WHEN 'open' THEN 1 WHEN 'in_progress' THEN 2 WHEN 'escalated' THEN 3 ELSE 4 END, i.updated_at DESC
+    LIMIT 8
+  `, [tenantId, tenantId, propertyId, propertyId, issueId, issueId]);
+
+  const whatsappIssueMessages = queryAll(db, `
+    SELECT m.sender, m.content, m.message_type, m.created_at, i.uuid as issue_uuid, i.title as issue_title
+    FROM messages m
+    JOIN issues i ON i.id = m.issue_id
+    WHERE (? IS NOT NULL AND i.id = ?)
+       OR (? IS NOT NULL AND i.tenant_id = ?)
+       OR (? IS NOT NULL AND i.property_id = ?)
+    ORDER BY m.created_at DESC
+    LIMIT 12
+  `, [issueId, issueId, tenantId, tenantId, propertyId, propertyId]);
+
+  const whatsappIntakeByPerson = nameClauses ? queryAll(db, `
+    SELECT i.sender, i.content, i.occurred_at, i.source_name
+    FROM intake_items i
+    WHERE i.source_type LIKE 'whatsapp%' AND (${nameClauses})
+    ORDER BY COALESCE(i.occurred_at, i.created_at) DESC
+    LIMIT 10
+  `, nameParams) : [];
+
+  const whatsappIntakeByDomain = queryAll(db, `
+    SELECT i.sender, i.content, i.occurred_at, e.title, e.summary, e.domain, e.priority
+    FROM intake_extractions e
+    JOIN intake_items i ON i.id = e.intake_item_id
+    WHERE i.source_type LIKE 'whatsapp%' AND e.domain = ?
+    ORDER BY e.created_at DESC
+    LIMIT 8
+  `, [classification.domain]);
+
+  const openTasks = queryAll(db, `
+    SELECT title, description, domain, priority, assigned_to, due_date, created_at
+    FROM agent_tasks
+    WHERE status = 'open'
+      AND (
+        domain = ?
+        OR (? IS NOT NULL AND tenant_id = ?)
+        OR (? IS NOT NULL AND issue_id = ?)
+      )
+    ORDER BY CASE priority WHEN 'urgent' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3 ELSE 4 END, created_at DESC
+    LIMIT 8
+  `, [classification.domain, tenantId, tenantId, issueId, issueId]);
+
+  return {
+    previousEmails,
+    previousEmailLogs,
+    tenantEmails,
+    domainEmails,
+    relatedIssues,
+    whatsappIssueMessages,
+    whatsappIntakeByPerson,
+    whatsappIntakeByDomain,
+    openTasks
+  };
+}
+
+function summariseBusinessMemory(memory) {
+  const safeMemory = {
+    previousEmails: [],
+    previousEmailLogs: [],
+    tenantEmails: [],
+    domainEmails: [],
+    relatedIssues: [],
+    whatsappIssueMessages: [],
+    whatsappIntakeByPerson: [],
+    whatsappIntakeByDomain: [],
+    openTasks: [],
+    ...(memory || {})
+  };
+  return {
+    previous_email_count: safeMemory.previousEmails.length,
+    previous_email_log_count: safeMemory.previousEmailLogs.length,
+    tenant_email_count: safeMemory.tenantEmails.length,
+    domain_email_count: safeMemory.domainEmails.length,
+    related_issue_count: safeMemory.relatedIssues.length,
+    whatsapp_issue_message_count: safeMemory.whatsappIssueMessages.length,
+    whatsapp_intake_person_count: safeMemory.whatsappIntakeByPerson.length,
+    whatsapp_intake_domain_count: safeMemory.whatsappIntakeByDomain.length,
+    open_task_count: safeMemory.openTasks.length,
+    latest_previous_email_subjects: [
+      ...safeMemory.previousEmails.slice(0, 3).map(item => item.subject).filter(Boolean),
+      ...safeMemory.previousEmailLogs.slice(0, 3).map(item => item.subject).filter(Boolean)
+    ].filter((subject, index, values) => subject && values.indexOf(subject) === index).slice(0, 5),
+    latest_related_issues: safeMemory.relatedIssues.slice(0, 3).map(item => ({
+      uuid: item.uuid,
+      title: item.title,
+      status: item.status,
+      priority: item.priority
+    })),
+    latest_open_tasks: safeMemory.openTasks.slice(0, 3).map(item => ({
+      title: item.title,
+      priority: item.priority,
+      assigned_to: item.assigned_to
+    }))
+  };
+}
+
+function formatInternalMemoryBrief(memory) {
+  const summary = summariseBusinessMemory(memory);
+  const lines = [];
+  if (summary.latest_related_issues.length) {
+    lines.push(`Related issues: ${summary.latest_related_issues.map(issue => `${issue.uuid || 'issue'} ${issue.title} (${issue.status})`).join('; ')}`);
+  }
+  if (summary.latest_previous_email_subjects.length) {
+    lines.push(`Previous emails: ${summary.latest_previous_email_subjects.join('; ')}`);
+  }
+  if (summary.latest_open_tasks.length) {
+    lines.push(`Open tasks: ${summary.latest_open_tasks.map(task => `${task.title}${task.assigned_to ? ` -> ${task.assigned_to}` : ''}`).join('; ')}`);
+  }
+  if (summary.whatsapp_issue_message_count || summary.whatsapp_intake_person_count || summary.whatsapp_intake_domain_count) {
+    lines.push(`WhatsApp context: ${summary.whatsapp_issue_message_count + summary.whatsapp_intake_person_count + summary.whatsapp_intake_domain_count} relevant stored WhatsApp/context items considered.`);
+  }
+  return lines.join('\n');
+}
+
 function classifyEmail({ subject = '', body = '', fromEmail = '', fromName = '', tenant = null, issueId = null }) {
   const text = `${subject}\n${body}`.toLowerCase();
   const has = (...patterns) => patterns.some(pattern => pattern.test(text));
@@ -163,15 +360,21 @@ function classifyEmail({ subject = '', body = '', fromEmail = '', fromName = '',
     priority = 'low';
   }
 
-  const needsReply = !isNoReplyAddress(fromEmail) && (
-    /\?/.test(subject) ||
+  const clearlyInformational = has(/fyi only/, /for your records/, /no action required/, /statement attached/, /receipt attached/, /newsletter/, /unsubscribe/);
+  const directAsk = /\?/.test(subject) ||
     /\?/.test(body) ||
-    has(/can you/, /could you/, /please/, /let me know/, /confirm/, /advise/, /reply/, /respond/, /follow up/, /chase/) ||
-    domain !== 'operations'
+    has(/can you/, /could you/, /please/, /let me know/, /confirm/, /advise/, /reply/, /respond/, /follow up/, /chase/, /would you/, /are you able/, /need help/, /need to arrange/);
+
+  const needsReply = !isLikelyAutomatedEmail(fromEmail, subject, body) && !clearlyInformational && (
+    directAsk ||
+    domain !== 'operations' ||
+    !!tenant ||
+    /^(re|fw|fwd):/i.test(subject || '')
   );
 
   const needsTeamFollowup = priority !== 'low' && (
     domain !== 'operations' ||
+    directAsk ||
     has(/need to/, /please can/, /can someone/, /make sure/, /book/, /arrange/, /send/, /pay/, /approve/, /sign/, /deadline/, /chase/)
   );
 
@@ -211,7 +414,7 @@ function classifyEmail({ subject = '', body = '', fromEmail = '', fromName = '',
   };
 }
 
-function buildReplyDraft({ fromName, subject, classification, tenant, issue }) {
+function buildReplyDraft({ fromName, subject, classification, tenant, issue, memory }) {
   const greetingName = firstName(fromName || tenant?.name);
   const greeting = greetingName ? `Hi ${greetingName},` : 'Hi,';
   const safeSubject = subject ? subject.replace(/^re:\s*/i, '') : 'your email';
@@ -234,11 +437,43 @@ function buildReplyDraft({ fromName, subject, classification, tenant, issue }) {
     ? '\n\nIf this is an immediate safety issue, please call the emergency contact route as well as replying here.'
     : '';
 
+  const memorySummary = summariseBusinessMemory(memory || {
+    previousEmails: [],
+    previousEmailLogs: [],
+    tenantEmails: [],
+    domainEmails: [],
+    relatedIssues: [],
+    whatsappIssueMessages: [],
+    whatsappIntakeByPerson: [],
+    whatsappIntakeByDomain: [],
+    openTasks: []
+  });
+
+  const contextLines = [];
+  const openIssue = (memory?.relatedIssues || []).find(item => ['open', 'in_progress', 'escalated'].includes(item.status));
+  if (openIssue && (!issue || openIssue.id !== issue.id)) {
+    contextLines.push(`I can see we already have a related item open on our side (${openIssue.uuid || openIssue.id}: ${openIssue.title}), so I have kept this with that context.`);
+  }
+  if (memorySummary.previous_email_count > 0 || memorySummary.previous_email_log_count > 0) {
+    const latestSubject = memorySummary.latest_previous_email_subjects[0];
+    contextLines.push(latestSubject
+      ? `I have also taken the earlier correspondence about "${latestSubject}" into account.`
+      : 'I have also taken the earlier correspondence into account.');
+  }
+  if (memorySummary.whatsapp_issue_message_count > 0 || memorySummary.whatsapp_intake_person_count > 0 || memorySummary.whatsapp_intake_domain_count > 0) {
+    contextLines.push('I have added this to the existing internal notes and WhatsApp context for the team.');
+  }
+  if (memorySummary.open_task_count > 0) {
+    const owner = memory.openTasks.find(task => task.assigned_to)?.assigned_to;
+    contextLines.push(owner ? `This is flagged for follow-up with ${owner}.` : 'This is flagged for team follow-up.');
+  }
+  const contextBlock = contextLines.length ? `\n\n${contextLines.join(' ')}` : '';
+
   return `${greeting}
 
 Thanks for your email about ${safeSubject}.
 
-${issueLine} ${domainLines[classification.domain] || domainLines.operations}${urgencyLine}
+${issueLine} ${domainLines[classification.domain] || domainLines.operations}${contextBlock}${urgencyLine}
 
 Best,
 52 Old Elvet Team`;
@@ -264,6 +499,12 @@ async function recordEmailItem({ accountId, messageId, gmailThreadId, fromEmail,
     const issue = issueId ? db.prepare('SELECT * FROM issues WHERE id = ?').get(issueId) : null;
     const log = db.prepare('SELECT id FROM email_sync_log WHERE message_id = ?').get(messageId);
     const classification = classifyEmail({ subject, body, fromEmail, fromName, tenant, issueId });
+    const memory = buildBusinessMemory(db, { messageId, fromEmail, fromName, tenant, issue, classification });
+    const memorySummary = summariseBusinessMemory(memory);
+    const actionWithMemory = {
+      ...classification.action,
+      business_memory: memorySummary
+    };
 
     const itemId = db.prepare(`
       INSERT INTO email_agent_items (
@@ -288,14 +529,14 @@ async function recordEmailItem({ accountId, messageId, gmailThreadId, fromEmail,
       classification.needs_team_followup,
       classification.suggested_owner,
       classification.summary,
-      JSON.stringify(classification.action)
+      JSON.stringify(actionWithMemory)
     ).lastInsertRowid;
 
     let draftId = null;
     let gmailDraftId = null;
     let gmailDraftStatus = null;
     if (classification.needs_reply && fromEmail && !isNoReplyAddress(fromEmail) && isManagedInboxAccount(account)) {
-      const draftBody = buildReplyDraft({ fromName, subject, classification, tenant, issue });
+      const draftBody = buildReplyDraft({ fromName, subject, classification, tenant, issue, memory });
       draftId = db.prepare(`
         INSERT INTO email_agent_drafts (email_agent_item_id, email_account_id, message_id, gmail_thread_id, to_address, subject, body_text, gmail_draft_status)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -357,7 +598,7 @@ async function recordEmailItem({ accountId, messageId, gmailThreadId, fromEmail,
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         `Email follow-up: ${subject || fromEmail || 'No subject'}`.slice(0, 140),
-        `${classification.summary}\n\nSuggested action: ${classification.action.suggested_action}\n\nPreview: ${truncate(body, 700)}`,
+        `${classification.summary}\n\nSuggested action: ${classification.action.suggested_action}\n\nContext considered:\n${formatInternalMemoryBrief(memory) || 'No previous email or WhatsApp context found yet.'}\n\nPreview: ${truncate(body, 700)}`,
         classification.domain,
         matchedTenantId || null,
         issueId || null,
@@ -373,7 +614,7 @@ async function recordEmailItem({ accountId, messageId, gmailThreadId, fromEmail,
       recordEvent(db, 'email_item_processed', classification.domain, messageId, { draft_id: draftId });
     }
 
-    return { id: itemId, draft_id: draftId, gmail_draft_id: gmailDraftId, gmail_draft_status: gmailDraftStatus, classification, account: account?.email_address || null };
+    return { id: itemId, draft_id: draftId, gmail_draft_id: gmailDraftId, gmail_draft_status: gmailDraftStatus, classification, memory: memorySummary, account: account?.email_address || null };
   } finally {
     db.close();
   }

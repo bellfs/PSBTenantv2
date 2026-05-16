@@ -204,6 +204,7 @@ Capabilities:
 
 - Sync the connected admin inbox from Settings.
 - Classify incoming email by operating domain.
+- Build a compact business memory bundle from prior email sync history, previous email-agent items, tenant/property issues, issue WhatsApp messages, imported team WhatsApp context, intake extractions and open agent tasks.
 - Create follow-up tasks for the likely owner.
 - Draft replies into an approval queue.
 - Create matching Gmail Drafts for reply-worthy emails in `admin@52oldelvet.com`.
