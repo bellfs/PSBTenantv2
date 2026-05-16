@@ -117,6 +117,37 @@ export const api = {
   // Copilot
   askCopilot: (question, history) => request('/copilot/ask', { method: 'POST', body: JSON.stringify({ question, history }) }),
 
+  // FFR Property OS
+  getOSOverview: () => request('/os/overview'),
+  getAgents: () => request('/agents'),
+  getAgentHealth: () => request('/agents/health'),
+  getAgentRuns: (limit = 50) => request(`/agents/runs?limit=${limit}`),
+  runAgent: (key, data = {}) => request(`/agents/${key}/run`, { method: 'POST', body: JSON.stringify(data) }),
+  getAgentTasks: (params = {}) => { const qs = new URLSearchParams(params).toString(); return request(`/agents/tasks${qs ? '?' + qs : ''}`); },
+  createAgentTask: (data) => request('/agents/tasks', { method: 'POST', body: JSON.stringify(data) }),
+  updateAgentTask: (id, data) => request(`/agents/tasks/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  getAgentApprovals: (status = 'pending') => request(`/agents/approvals?status=${status}`),
+  createAgentApproval: (data) => request('/agents/approvals', { method: 'POST', body: JSON.stringify(data) }),
+  updateAgentApproval: (id, status) => request(`/agents/approvals/${id}`, { method: 'PUT', body: JSON.stringify({ status }) }),
+
+  // Intake
+  processWhatsAppExport: (data) => request('/intake/whatsapp-export', { method: 'POST', body: JSON.stringify(data) }),
+  getIntakeSummary: () => request('/intake/summary'),
+  getIntakeItems: (limit = 100) => request(`/intake/items?limit=${limit}`),
+  getIntakeExtractions: (limit = 100) => request(`/intake/extractions?limit=${limit}`),
+
+  // Admin Email Agent
+  getEmailAgentSummary: () => request('/email-agent/summary'),
+  getEmailAgentItems: (limit = 100) => request(`/email-agent/items?limit=${limit}`),
+  getEmailAgentDrafts: (status = 'draft', limit = 100) => request(`/email-agent/drafts?status=${encodeURIComponent(status)}&limit=${limit}`),
+  runEmailAgent: () => request('/email-agent/run', { method: 'POST' }),
+  updateEmailAgentDraft: (id, data) => request(`/email-agent/drafts/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  approveEmailAgentDraft: (id) => request(`/email-agent/drafts/${id}/approve`, { method: 'POST' }),
+  sendEmailAgentDraft: (id) => request(`/email-agent/drafts/${id}/send`, { method: 'POST' }),
+  previewEmailDailyReport: (date) => request('/email-agent/reports/daily/preview', { method: 'POST', body: JSON.stringify({ date }) }),
+  sendEmailDailyReport: (date) => request('/email-agent/reports/daily/send', { method: 'POST', body: JSON.stringify({ date }) }),
+  getEmailAgentReports: (limit = 30) => request(`/email-agent/reports?limit=${limit}`),
+
   // Inspections (Check-In / Check-Out)
   getInspections: (params = {}) => { const qs = new URLSearchParams(params).toString(); return request(`/inspections?${qs}`); },
   getInspection: (id) => request(`/inspections/${id}`),

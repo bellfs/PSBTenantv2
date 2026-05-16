@@ -164,6 +164,68 @@ async function initialiseDatabase() {
     FOREIGN KEY (email_account_id) REFERENCES email_accounts(id)
   )`);
 
+  db.exec(`CREATE TABLE IF NOT EXISTS email_agent_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    email_account_id INTEGER,
+    email_sync_log_id INTEGER,
+    message_id TEXT NOT NULL UNIQUE,
+    from_address TEXT,
+    from_name TEXT,
+    subject TEXT,
+    body_preview TEXT,
+    matched_tenant_id INTEGER,
+    issue_id INTEGER,
+    domain TEXT DEFAULT 'operations',
+    priority TEXT DEFAULT 'medium',
+    status TEXT DEFAULT 'new',
+    needs_reply INTEGER DEFAULT 0,
+    needs_team_followup INTEGER DEFAULT 0,
+    suggested_owner TEXT,
+    summary TEXT,
+    action_json TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (email_account_id) REFERENCES email_accounts(id),
+    FOREIGN KEY (email_sync_log_id) REFERENCES email_sync_log(id),
+    FOREIGN KEY (matched_tenant_id) REFERENCES tenants(id),
+    FOREIGN KEY (issue_id) REFERENCES issues(id)
+  )`);
+
+  db.exec(`CREATE TABLE IF NOT EXISTS email_agent_drafts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    email_agent_item_id INTEGER,
+    email_account_id INTEGER,
+    message_id TEXT,
+    to_address TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    body_text TEXT NOT NULL,
+    status TEXT DEFAULT 'draft',
+    gmail_draft_id TEXT,
+    created_by TEXT DEFAULT 'admin_email_agent',
+    approved_by TEXT,
+    approved_at DATETIME,
+    sent_at DATETIME,
+    error TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (email_agent_item_id) REFERENCES email_agent_items(id),
+    FOREIGN KEY (email_account_id) REFERENCES email_accounts(id)
+  )`);
+
+  db.exec(`CREATE TABLE IF NOT EXISTS email_agent_reports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    report_date DATE NOT NULL UNIQUE,
+    subject TEXT NOT NULL,
+    body_text TEXT NOT NULL,
+    body_html TEXT,
+    recipients_json TEXT,
+    status TEXT DEFAULT 'draft',
+    sent_at DATETIME,
+    error TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+
   db.exec(`CREATE TABLE IF NOT EXISTS compliance_certificates (
     id INTEGER PRIMARY KEY AUTOINCREMENT, property_id INTEGER NOT NULL,
     cert_type TEXT NOT NULL, certificate_number TEXT,
@@ -194,6 +256,11 @@ async function initialiseDatabase() {
   db.exec('CREATE INDEX IF NOT EXISTS idx_documents_tenant ON documents(tenant_id)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_tenants_email ON tenants(email)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_email_sync_msg ON email_sync_log(message_id)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_email_agent_items_message ON email_agent_items(message_id)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_email_agent_items_status ON email_agent_items(status)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_email_agent_items_domain ON email_agent_items(domain)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_email_agent_drafts_status ON email_agent_drafts(status)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_email_agent_reports_date ON email_agent_reports(report_date)');
 
   // ===== UTILITIES MANAGEMENT TABLES =====
   db.exec(`CREATE TABLE IF NOT EXISTS meter_readings (
@@ -395,6 +462,134 @@ async function initialiseDatabase() {
   db.exec('CREATE INDEX IF NOT EXISTS idx_bank_txn_property ON bank_transactions(property_id)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_bank_txn_category ON bank_transactions(ai_category)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_bank_txn_direction ON bank_transactions(direction)');
+
+  // ===== FFR PROPERTY OS / AGENTIC WORKFLOW TABLES =====
+  db.exec(`CREATE TABLE IF NOT EXISTS agent_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent_key TEXT NOT NULL,
+    agent_name TEXT NOT NULL,
+    trigger_type TEXT DEFAULT 'manual',
+    status TEXT DEFAULT 'queued',
+    mode TEXT DEFAULT 'dry_run',
+    prompt TEXT,
+    input_json TEXT,
+    context_json TEXT,
+    output_text TEXT,
+    error TEXT,
+    codex_command TEXT,
+    created_by TEXT,
+    started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    completed_at DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  db.exec(`CREATE TABLE IF NOT EXISTS agent_tasks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    description TEXT,
+    domain TEXT DEFAULT 'operations',
+    property_id INTEGER,
+    tenant_id INTEGER,
+    issue_id INTEGER,
+    priority TEXT DEFAULT 'medium',
+    status TEXT DEFAULT 'open',
+    source TEXT DEFAULT 'manual',
+    source_ref TEXT,
+    assigned_to TEXT,
+    due_date DATE,
+    created_by TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (property_id) REFERENCES properties(id),
+    FOREIGN KEY (tenant_id) REFERENCES tenants(id),
+    FOREIGN KEY (issue_id) REFERENCES issues(id)
+  )`);
+
+  db.exec(`CREATE TABLE IF NOT EXISTS agent_approvals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent_run_id INTEGER,
+    task_id INTEGER,
+    action_type TEXT NOT NULL,
+    title TEXT NOT NULL,
+    summary TEXT,
+    payload_json TEXT,
+    risk_level TEXT DEFAULT 'medium',
+    status TEXT DEFAULT 'pending',
+    requested_by TEXT,
+    reviewed_by TEXT,
+    reviewed_at DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (agent_run_id) REFERENCES agent_runs(id),
+    FOREIGN KEY (task_id) REFERENCES agent_tasks(id)
+  )`);
+
+  db.exec(`CREATE TABLE IF NOT EXISTS agent_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_type TEXT NOT NULL,
+    domain TEXT DEFAULT 'operations',
+    source TEXT DEFAULT 'system',
+    source_ref TEXT,
+    actor TEXT,
+    property_id INTEGER,
+    tenant_id INTEGER,
+    issue_id INTEGER,
+    payload_json TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (property_id) REFERENCES properties(id),
+    FOREIGN KEY (tenant_id) REFERENCES tenants(id),
+    FOREIGN KEY (issue_id) REFERENCES issues(id)
+  )`);
+
+  db.exec('CREATE INDEX IF NOT EXISTS idx_agent_runs_key ON agent_runs(agent_key)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_agent_runs_status ON agent_runs(status)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_agent_tasks_status ON agent_tasks(status)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_agent_tasks_domain ON agent_tasks(domain)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_agent_tasks_due ON agent_tasks(due_date)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_agent_approvals_status ON agent_approvals(status)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_agent_events_type ON agent_events(event_type)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_agent_events_domain ON agent_events(domain)');
+
+  db.exec(`CREATE TABLE IF NOT EXISTS intake_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_type TEXT NOT NULL,
+    source_name TEXT,
+    external_id TEXT,
+    sender TEXT,
+    occurred_at DATETIME,
+    content TEXT NOT NULL,
+    raw_json TEXT,
+    status TEXT DEFAULT 'processed',
+    created_by TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(source_type, external_id)
+  )`);
+
+  db.exec(`CREATE TABLE IF NOT EXISTS intake_extractions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    intake_item_id INTEGER NOT NULL,
+    extraction_type TEXT NOT NULL,
+    title TEXT NOT NULL,
+    summary TEXT,
+    domain TEXT DEFAULT 'operations',
+    priority TEXT DEFAULT 'medium',
+    confidence REAL DEFAULT 0,
+    status TEXT DEFAULT 'created',
+    agent_key TEXT,
+    risk_level TEXT DEFAULT 'medium',
+    payload_json TEXT,
+    task_id INTEGER,
+    approval_id INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (intake_item_id) REFERENCES intake_items(id),
+    FOREIGN KEY (task_id) REFERENCES agent_tasks(id),
+    FOREIGN KEY (approval_id) REFERENCES agent_approvals(id)
+  )`);
+
+  db.exec('CREATE INDEX IF NOT EXISTS idx_intake_items_source ON intake_items(source_type, source_name)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_intake_items_occurred ON intake_items(occurred_at)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_intake_extractions_item ON intake_extractions(intake_item_id)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_intake_extractions_domain ON intake_extractions(domain)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_intake_extractions_agent ON intake_extractions(agent_key)');
 
   // Migrate meter_readings unique constraint if table already exists without property_name in unique
   // (safe to run - just adds the column to the unique constraint concept via the CREATE TABLE IF NOT EXISTS above)

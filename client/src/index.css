@@ -883,6 +883,10 @@ tr:last-child td { border-bottom: none; }
   .utility-summary-grid { grid-template-columns: 1fr !important; }
 }
 
+@media (max-width: 980px) {
+  .agents-layout-grid { grid-template-columns: 1fr !important; }
+}
+
 /* mobile-copilot-bar: shown/hidden via media queries in mobile block above */
 
 /* ===== CHECK-IN / CHECK-OUT ===== */

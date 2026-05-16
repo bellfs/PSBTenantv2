@@ -9,7 +9,10 @@
     "client": "cd client && npm run dev",
     "setup": "node server/setup.js",
     "build": "cd client && npm install --include=dev && npm run build",
-    "start": "node server/index.js"
+    "start": "node server/index.js",
+    "agent": "node scripts/ffr-agent.js",
+    "agent:list": "node scripts/ffr-agent.js list",
+    "agent:health": "node scripts/ffr-agent.js health"
   },
   "dependencies": {
     "axios": "^1.6.2",

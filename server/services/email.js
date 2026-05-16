@@ -289,4 +289,22 @@ async function sendEscalationEmail({ issue, tenant, property, messages, attachme
   }
 }
 
-module.exports = { sendEscalationEmail, sendNewIssueEmail };
+async function sendGenericEmail({ to, cc, bcc, subject, text, html, fromName = 'FFR Property OS' }) {
+  const transporter = getTransporter();
+  const fromAddress = process.env.SMTP_USER || process.env.ADMIN_EMAIL || 'admin@52oldelvet.com';
+  const mailOptions = {
+    from: `"${fromName}" <${fromAddress}>`,
+    to,
+    cc,
+    bcc,
+    subject,
+    text,
+    html: html || (text ? text.replace(/\n/g, '<br>') : undefined)
+  };
+
+  const info = await transporter.sendMail(mailOptions);
+  console.log('[Email] Generic email sent:', subject);
+  return info;
+}
+
+module.exports = { sendEscalationEmail, sendNewIssueEmail, sendGenericEmail };

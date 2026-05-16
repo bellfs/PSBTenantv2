@@ -34,6 +34,7 @@ function getGmailAuthUrl() {
     prompt: 'consent',
     scope: [
       'https://www.googleapis.com/auth/gmail.readonly',
+      'https://www.googleapis.com/auth/gmail.compose',
       'https://www.googleapis.com/auth/userinfo.email',
     ],
   });
@@ -342,6 +343,18 @@ async function processEmail(accountId, messageId, fromEmail, fromName, subject, 
             db.prepare('INSERT OR IGNORE INTO email_sync_log (email_account_id, message_id, from_address, subject, matched_tenant_id, issue_id, status) VALUES (?, ?, ?, ?, ?, ?, ?)')
               .run(accountId, messageId, fromEmail, subject, tenant.id, result.lastInsertRowid, 'issue_created');
 
+            await handToEmailAgent({
+              accountId,
+              messageId,
+              fromEmail,
+              fromName,
+              subject,
+              body,
+              matchedTenantId: tenant.id,
+              issueId: result.lastInsertRowid,
+              status: 'issue_created'
+            });
+
             return { matched: true, issueCreated: true };
           }
         } catch (e) {
@@ -354,8 +367,29 @@ async function processEmail(accountId, messageId, fromEmail, fromName, subject, 
     db.prepare('INSERT OR IGNORE INTO email_sync_log (email_account_id, message_id, from_address, subject, matched_tenant_id, status) VALUES (?, ?, ?, ?, ?, ?)')
       .run(accountId, messageId, fromEmail, subject, matchedTenantId, matchedTenantId ? 'matched' : 'processed');
 
+    await handToEmailAgent({
+      accountId,
+      messageId,
+      fromEmail,
+      fromName,
+      subject,
+      body,
+      matchedTenantId,
+      issueId: null,
+      status: matchedTenantId ? 'matched' : 'processed'
+    });
+
     return { matched: !!matchedTenantId, issueCreated: false };
   } finally { db.close(); }
+}
+
+async function handToEmailAgent(payload) {
+  try {
+    const { recordEmailItem } = require('./email-agent');
+    await recordEmailItem(payload);
+  } catch (error) {
+    console.error('[EmailAgent] Could not record email item:', error.message);
+  }
 }
 
 function checkMaintenanceRelevance(subject, body) {

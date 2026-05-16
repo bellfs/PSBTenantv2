@@ -2,17 +2,9 @@ const express = require('express');
 const router = express.Router();
 const { getDb } = require('../database');
 const { syncAccount, categoriseTransactions } = require('../services/bank-sync');
+const { authenticate } = require('../middleware/auth');
 
-// Middleware: require auth
-router.use((req, res, next) => {
-  if (!req.headers.authorization) return res.status(401).json({ error: 'Auth required' });
-  const jwt = require('jsonwebtoken');
-  try {
-    const token = req.headers.authorization.replace('Bearer ', '');
-    req.user = jwt.verify(token, process.env.JWT_SECRET || 'psb-secret-key-change-me');
-    next();
-  } catch { res.status(401).json({ error: 'Invalid token' }); }
-});
+router.use(authenticate);
 
 // ===== BANK ACCOUNTS =====
 

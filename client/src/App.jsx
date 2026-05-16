@@ -2,6 +2,10 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { api, setToken, clearToken, getStoredUser, setStoredUser } from './utils/api';
 import Login from './pages/Login';
+import OSOverview from './pages/OSOverview';
+import Agents from './pages/Agents';
+import Intake from './pages/Intake';
+import EmailAgent from './pages/EmailAgent';
 import Dashboard from './pages/Dashboard';
 import Issues from './pages/Issues';
 import IssueDetail from './pages/IssueDetail';
@@ -49,6 +53,10 @@ export default function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
             <Route index element={<Dashboard />} />
+            <Route path="os" element={<OSOverview />} />
+            <Route path="agents" element={<Agents />} />
+            <Route path="intake" element={<Intake />} />
+            <Route path="email-agent" element={<EmailAgent />} />
             <Route path="issues" element={<Issues />} />
             <Route path="issues/:id" element={<IssueDetail />} />
             <Route path="timeline" element={<IssueTimeline />} />

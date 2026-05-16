@@ -23,6 +23,10 @@ app.use('/api/issues', require('./routes/issues'));
 app.use('/api/contractors', require('./routes/contractors'));
 app.use('/api/email', require('./routes/email'));
 app.use('/api/copilot', require('./routes/copilot'));
+app.use('/api/os', require('./routes/os'));
+app.use('/api/agents', require('./routes/agents'));
+app.use('/api/intake', require('./routes/intake'));
+app.use('/api/email-agent', require('./routes/email-agent'));
 app.use('/api/compliance', require('./routes/compliance'));
 app.use('/api/utilities', require('./routes/utilities'));
 app.use('/api/inspections', require('./routes/inspections'));
@@ -58,6 +62,11 @@ app.listen(PORT, async () => {
     const { startSyncScheduler } = require('./services/email-sync');
     startSyncScheduler();
   } catch (e) { console.log('  Email sync scheduler skipped:', e.message); }
+
+  try {
+    const { startEmailAgentScheduler } = require('./services/email-agent');
+    startEmailAgentScheduler();
+  } catch (e) { console.log('  Email agent scheduler skipped:', e.message); }
 
   // Auto-subscribe this app to the WABA for webhook delivery
   if (process.env.WHATSAPP_BUSINESS_ACCOUNT_ID && process.env.WHATSAPP_ACCESS_TOKEN) {

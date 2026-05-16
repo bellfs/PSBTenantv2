@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../App';
-import { LayoutDashboard, AlertCircle, Building2, Users, Settings, LogOut, Wrench, BarChart3, Menu, X, HardHat, ShieldCheck, CalendarRange, Zap, Sparkles, ClipboardCheck, ClipboardList, Landmark } from 'lucide-react';
+import { LayoutDashboard, AlertCircle, Building2, Users, Settings, LogOut, Wrench, BarChart3, Menu, X, HardHat, ShieldCheck, CalendarRange, Zap, Sparkles, ClipboardCheck, ClipboardList, Landmark, Workflow, Bot, Inbox, MailCheck } from 'lucide-react';
 import CopilotPanel from './CopilotPanel';
 
 // Page-contextual placeholder suggestions that rotate
@@ -12,6 +12,30 @@ const PAGE_SUGGESTIONS = {
     'Which property has the most issues?',
     'Are any compliance certs expiring?',
     'Show me overdue issues',
+  ],
+  '/os': [
+    'What needs attention across the business?',
+    'Which operating lane is weakest?',
+    'What needs approval?',
+    'Show me the biggest risk signals',
+  ],
+  '/agents': [
+    'Run the compliance guardian',
+    'Draft a contractor value check',
+    'Preview a leasing revenue action',
+    'What can Codex agents do today?',
+  ],
+  '/intake': [
+    'Import the team WhatsApp chat',
+    'What tasks were extracted?',
+    'Which items need approval?',
+    'Which agent should handle this?',
+  ],
+  '/email-agent': [
+    'Sync admin inbox now',
+    'What replies need approval?',
+    'Generate today\'s team email brief',
+    'Which email follow-ups are open?',
   ],
   '/issues': [
     'Which issues are escalated?',
@@ -139,6 +163,10 @@ export default function Layout() {
   const navLinks = (
     <>
       <NavLink to="/" end className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}><LayoutDashboard size={18} /> Dashboard</NavLink>
+      <NavLink to="/os" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}><Workflow size={18} /> FFR OS</NavLink>
+      <NavLink to="/agents" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}><Bot size={18} /> Agents</NavLink>
+      <NavLink to="/intake" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}><Inbox size={18} /> Intake</NavLink>
+      <NavLink to="/email-agent" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}><MailCheck size={18} /> Email Agent</NavLink>
       <NavLink to="/issues" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}><AlertCircle size={18} /> Issues</NavLink>
       <NavLink to="/timeline" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}><CalendarRange size={18} /> Issue Timeline</NavLink>
       <NavLink to="/properties" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}><Building2 size={18} /> Properties</NavLink>
@@ -166,8 +194,8 @@ export default function Layout() {
           <Wrench size={16} style={{ color: 'white' }} />
         </div>
         <div>
-          <h1>PSB Maintenance</h1>
-          <span>Property Management Hub</span>
+          <h1>FFR Property OS</h1>
+          <span>Agentic Operations Hub</span>
         </div>
       </div>
     </div>
@@ -211,7 +239,7 @@ export default function Layout() {
           }}>
             <Wrench size={12} style={{ color: 'white' }} />
           </div>
-          PSB Maintenance
+          FFR Property OS
         </h1>
         <div className="sidebar-user-avatar" style={{ width: 28, height: 28, fontSize: 11 }}>{initials}</div>
       </div>
@@ -238,8 +266,8 @@ export default function Layout() {
               <Wrench size={16} style={{ color: 'white' }} />
             </div>
             <div>
-              <h1>PSB Maintenance</h1>
-              <span>Property Management Hub</span>
+              <h1>FFR Property OS</h1>
+              <span>Agentic Operations Hub</span>
             </div>
           </div>
           <button className="mobile-menu-btn" onClick={() => setMobileOpen(false)}><X size={20} /></button>
