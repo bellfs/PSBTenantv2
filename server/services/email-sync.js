@@ -117,7 +117,7 @@ async function syncGmailAccount(account) {
       let body = extractBodyText(fullMsg.data.payload);
 
       processed++;
-      const result = await processEmail(account.id, msg.id, fromEmail, fromName, subject, body);
+      const result = await processEmail(account.id, msg.id, fromEmail, fromName, subject, body, { gmailThreadId: fullMsg.data.threadId });
       if (result.matched) matched++;
       if (result.issueCreated) issuesCreated++;
     }
@@ -285,7 +285,7 @@ async function syncImapAccount(account) {
 
 // ===== SHARED EMAIL PROCESSING =====
 
-async function processEmail(accountId, messageId, fromEmail, fromName, subject, body) {
+async function processEmail(accountId, messageId, fromEmail, fromName, subject, body, metadata = {}) {
   const db = getDb();
   let matchedTenantId = null;
   let issueCreated = false;
@@ -346,6 +346,7 @@ async function processEmail(accountId, messageId, fromEmail, fromName, subject, 
             await handToEmailAgent({
               accountId,
               messageId,
+              gmailThreadId: metadata.gmailThreadId || null,
               fromEmail,
               fromName,
               subject,
@@ -370,6 +371,7 @@ async function processEmail(accountId, messageId, fromEmail, fromName, subject, 
     await handToEmailAgent({
       accountId,
       messageId,
+      gmailThreadId: metadata.gmailThreadId || null,
       fromEmail,
       fromName,
       subject,

@@ -183,13 +183,14 @@ export default function EmailAgent() {
           ) : (
             <div className="table-container">
               <table>
-                <thead><tr><th>To</th><th>Subject</th><th>Status</th></tr></thead>
+                <thead><tr><th>To</th><th>Subject</th><th>Status</th><th>Gmail</th></tr></thead>
                 <tbody>
                   {drafts.slice(0, 12).map(draft => (
                     <tr key={draft.id} onClick={() => setSelectedDraft(draft)} style={{ cursor: 'pointer', background: selectedDraft?.id === draft.id ? 'rgba(99,102,241,0.08)' : undefined }}>
                       <td style={{ fontWeight: 600 }}>{draft.to_address}</td>
                       <td>{draft.subject}</td>
                       <td><span className={`badge ${statusBadge[draft.status] || 'badge-medium'}`}>{draft.status}</span></td>
+                      <td><span className={`badge ${draft.gmail_draft_status === 'created' ? 'badge-resolved' : draft.gmail_draft_status === 'failed' ? 'badge-urgent' : 'badge-medium'}`}>{draft.gmail_draft_status || 'platform'}</span></td>
                     </tr>
                   ))}
                 </tbody>
@@ -225,6 +226,16 @@ export default function EmailAgent() {
                   style={{ resize: 'vertical', lineHeight: 1.5 }}
                 />
               </div>
+              {selectedDraft.gmail_draft_id && (
+                <div className="alert-banner" style={{ fontSize: 12, color: 'var(--success)' }}>
+                  Gmail Draft created in admin inbox: {selectedDraft.gmail_draft_id}
+                </div>
+              )}
+              {selectedDraft.error && (
+                <div className="alert-banner" style={{ fontSize: 12, color: 'var(--warning)' }}>
+                  {selectedDraft.error}
+                </div>
+              )}
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap' }}>
                 <button className="btn btn-secondary btn-sm" onClick={saveDraft} disabled={loading === `save-${selectedDraft.id}`}><FileText size={14} /> Save</button>
                 <button className="btn btn-primary btn-sm" onClick={approveDraft} disabled={selectedDraft.status === 'approved' || selectedDraft.status === 'sent' || loading === `approve-${selectedDraft.id}`}><CheckCircle size={14} /> Approve</button>

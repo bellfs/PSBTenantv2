@@ -201,6 +201,8 @@ async function initialiseDatabase() {
     body_text TEXT NOT NULL,
     status TEXT DEFAULT 'draft',
     gmail_draft_id TEXT,
+    gmail_thread_id TEXT,
+    gmail_draft_status TEXT,
     created_by TEXT DEFAULT 'admin_email_agent',
     approved_by TEXT,
     approved_at DATETIME,
@@ -624,6 +626,8 @@ async function initialiseDatabase() {
     ['inspections','deposit_ref','ALTER TABLE inspections ADD COLUMN deposit_ref TEXT'],
     ['inspections','tenancy_clause','ALTER TABLE inspections ADD COLUMN tenancy_clause TEXT'],
     ['inspections','cleaning_standard','ALTER TABLE inspections ADD COLUMN cleaning_standard TEXT'],
+    ['email_agent_drafts','gmail_thread_id','ALTER TABLE email_agent_drafts ADD COLUMN gmail_thread_id TEXT'],
+    ['email_agent_drafts','gmail_draft_status','ALTER TABLE email_agent_drafts ADD COLUMN gmail_draft_status TEXT'],
   ];
   for (const [t,c,s] of cols) {
     try { db.prepare(`SELECT ${c} FROM ${t} LIMIT 0`).all(); } catch(e) {

@@ -1,6 +1,13 @@
 const { getDb } = require('../database');
 const { sendGenericEmail } = require('./email');
 
+let google = null;
+try {
+  google = require('googleapis').google;
+} catch (error) {
+  console.log('[EmailAgent] googleapis not installed - Gmail draft creation disabled');
+}
+
 const DEFAULT_TEAM_RECIPIENTS = [
   'andy@52oldelvet.com',
   'akiel@52oldelvet.com',
@@ -13,6 +20,70 @@ function getTeamRecipients() {
     .split(',')
     .map(email => email.trim())
     .filter(Boolean);
+}
+
+function getManagedInbox() {
+  return (process.env.EMAIL_AGENT_INBOX || 'admin@52oldelvet.com').toLowerCase();
+}
+
+function isManagedInboxAccount(account) {
+  return account?.email_address?.toLowerCase() === getManagedInbox();
+}
+
+function getGmailOAuth2Client() {
+  if (!google) throw new Error('googleapis package not installed');
+  const clientId = process.env.GOOGLE_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+  const redirectUri = process.env.GOOGLE_REDIRECT_URI || 'https://maintenance.52oldelvet.com/api/email/accounts/gmail/callback';
+  if (!clientId || !clientSecret) throw new Error('GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET environment variables are required');
+  return new google.auth.OAuth2(clientId, clientSecret, redirectUri);
+}
+
+function sanitizeHeader(value = '') {
+  return String(value || '').replace(/[\r\n]+/g, ' ').trim();
+}
+
+function encodeRawEmail(raw) {
+  return Buffer.from(raw, 'utf8')
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
+}
+
+async function createGmailDraft(account, { to, subject, bodyText, threadId }) {
+  if (!account || account.provider !== 'gmail') return null;
+  const oauth2Client = getGmailOAuth2Client();
+  const tokens = JSON.parse(account.credentials || '{}');
+  oauth2Client.setCredentials(tokens);
+
+  if (tokens.expiry_date && tokens.expiry_date < Date.now()) {
+    const { credentials } = await oauth2Client.refreshAccessToken();
+    const nextCredentials = { ...tokens, ...credentials, refresh_token: credentials.refresh_token || tokens.refresh_token };
+    oauth2Client.setCredentials(nextCredentials);
+    const db = getDb();
+    try {
+      db.prepare('UPDATE email_accounts SET credentials = ? WHERE id = ?').run(JSON.stringify(nextCredentials), account.id);
+    } finally {
+      db.close();
+    }
+  }
+
+  const raw = [
+    `To: ${sanitizeHeader(to)}`,
+    `Subject: ${sanitizeHeader(subject)}`,
+    'MIME-Version: 1.0',
+    'Content-Type: text/plain; charset="UTF-8"',
+    'Content-Transfer-Encoding: 8bit',
+    '',
+    bodyText || ''
+  ].join('\r\n');
+
+  const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+  const requestBody = { message: { raw: encodeRawEmail(raw) } };
+  if (threadId) requestBody.message.threadId = threadId;
+  const response = await gmail.users.drafts.create({ userId: 'me', requestBody });
+  return response.data;
 }
 
 function todayKey(date = new Date()) {
@@ -180,7 +251,7 @@ function recordEvent(db, eventType, domain, sourceRef, payload = {}) {
   `).run(eventType, domain, 'email_agent', sourceRef || null, 'admin_email_agent', JSON.stringify(payload));
 }
 
-async function recordEmailItem({ accountId, messageId, fromEmail, fromName, subject, body, matchedTenantId, issueId, status }) {
+async function recordEmailItem({ accountId, messageId, gmailThreadId, fromEmail, fromName, subject, body, matchedTenantId, issueId, status }) {
   const db = getDb();
   try {
     const existing = db.prepare('SELECT id FROM email_agent_items WHERE message_id = ?').get(messageId);
@@ -221,12 +292,49 @@ async function recordEmailItem({ accountId, messageId, fromEmail, fromName, subj
     ).lastInsertRowid;
 
     let draftId = null;
-    if (classification.needs_reply && fromEmail && !isNoReplyAddress(fromEmail)) {
+    let gmailDraftId = null;
+    let gmailDraftStatus = null;
+    if (classification.needs_reply && fromEmail && !isNoReplyAddress(fromEmail) && isManagedInboxAccount(account)) {
       const draftBody = buildReplyDraft({ fromName, subject, classification, tenant, issue });
       draftId = db.prepare(`
-        INSERT INTO email_agent_drafts (email_agent_item_id, email_account_id, message_id, to_address, subject, body_text)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `).run(itemId, accountId, messageId, fromEmail, subject ? `Re: ${subject.replace(/^re:\s*/i, '')}` : 'Re: Your email', draftBody).lastInsertRowid;
+        INSERT INTO email_agent_drafts (email_agent_item_id, email_account_id, message_id, gmail_thread_id, to_address, subject, body_text, gmail_draft_status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(itemId, accountId, messageId, gmailThreadId || null, fromEmail, subject ? `Re: ${subject.replace(/^re:\s*/i, '')}` : 'Re: Your email', draftBody, 'pending').lastInsertRowid;
+
+      if (account?.provider === 'gmail') {
+        try {
+          const gmailDraft = await createGmailDraft(account, {
+            to: fromEmail,
+            subject: subject ? `Re: ${subject.replace(/^re:\s*/i, '')}` : 'Re: Your email',
+            bodyText: draftBody,
+            threadId: gmailThreadId
+          });
+          gmailDraftId = gmailDraft?.id || null;
+          gmailDraftStatus = gmailDraftId ? 'created' : 'not_created';
+          db.prepare(`
+            UPDATE email_agent_drafts
+            SET gmail_draft_id = ?, gmail_draft_status = ?, error = NULL, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+          `).run(gmailDraftId, gmailDraftStatus, draftId);
+        } catch (error) {
+          gmailDraftStatus = 'failed';
+          const message = /insufficient|forbidden|scope|permission/i.test(error.message || '')
+            ? 'Gmail draft creation failed. Reconnect the Gmail account in Settings so it grants Gmail compose permission.'
+            : error.message;
+          db.prepare(`
+            UPDATE email_agent_drafts
+            SET gmail_draft_status = ?, error = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+          `).run(gmailDraftStatus, message, draftId);
+          console.error('[EmailAgent] Gmail draft creation failed:', message);
+        }
+      } else {
+        db.prepare(`
+          UPDATE email_agent_drafts
+          SET gmail_draft_status = ?, error = ?, updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `).run('not_gmail', 'Connect admin@52oldelvet.com with Gmail OAuth to create real Gmail drafts.', draftId);
+      }
 
       db.prepare(`
         INSERT INTO agent_approvals (action_type, title, summary, payload_json, risk_level, requested_by)
@@ -234,8 +342,10 @@ async function recordEmailItem({ accountId, messageId, fromEmail, fromName, subj
       `).run(
         'send_email_reply',
         `Review reply draft: ${subject || fromEmail}`,
-        `Draft reply to ${fromEmail} created by Admin Email Agent.`,
-        JSON.stringify({ draft_id: draftId, email_agent_item_id: itemId, to: fromEmail, subject }),
+        gmailDraftId
+          ? `Gmail Draft created for ${fromEmail} by Admin Email Agent.`
+          : `Reply draft to ${fromEmail} created by Admin Email Agent.`,
+        JSON.stringify({ draft_id: draftId, gmail_draft_id: gmailDraftId, email_agent_item_id: itemId, to: fromEmail, subject }),
         classification.risk_level,
         'admin_email_agent'
       );
@@ -263,7 +373,7 @@ async function recordEmailItem({ accountId, messageId, fromEmail, fromName, subj
       recordEvent(db, 'email_item_processed', classification.domain, messageId, { draft_id: draftId });
     }
 
-    return { id: itemId, draft_id: draftId, classification, account: account?.email_address || null };
+    return { id: itemId, draft_id: draftId, gmail_draft_id: gmailDraftId, gmail_draft_status: gmailDraftStatus, classification, account: account?.email_address || null };
   } finally {
     db.close();
   }

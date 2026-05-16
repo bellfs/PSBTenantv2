@@ -206,6 +206,7 @@ Capabilities:
 - Classify incoming email by operating domain.
 - Create follow-up tasks for the likely owner.
 - Draft replies into an approval queue.
+- Create matching Gmail Drafts for reply-worthy emails in `admin@52oldelvet.com`.
 - Require approval before sending replies.
 - Generate and send an end-of-day team brief.
 
@@ -227,6 +228,11 @@ Configuration:
 - `EMAIL_AGENT_REPORT_MINUTE=30`
 - `EMAIL_AGENT_TIMEZONE=Europe/London`
 - Scheduled reports wait until the configured admin inbox is connected unless `EMAIL_AGENT_SEND_EMPTY_REPORTS=true`.
+
+Gmail notes:
+
+- The connected Gmail account must grant `gmail.compose`.
+- If the inbox was connected before Gmail draft creation existed, reconnect it from Settings so Google issues a token with the compose scope.
 
 ### Phase 3: Leasing
 

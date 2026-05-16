@@ -111,6 +111,24 @@ const DEFAULT_SUGGESTIONS = [
   'Who is our electrician?',
 ];
 
+function SidebarLink({ to, icon: Icon, label, end = false }) {
+  return (
+    <NavLink to={to} end={end} className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}>
+      <Icon size={17} />
+      <span>{label}</span>
+    </NavLink>
+  );
+}
+
+function NavSection({ label, children }) {
+  return (
+    <div className="sidebar-section">
+      <div className="sidebar-section-label">{label}</div>
+      {children}
+    </div>
+  );
+}
+
 export default function Layout() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
@@ -162,23 +180,34 @@ export default function Layout() {
 
   const navLinks = (
     <>
-      <NavLink to="/" end className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}><LayoutDashboard size={18} /> Dashboard</NavLink>
-      <NavLink to="/os" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}><Workflow size={18} /> FFR OS</NavLink>
-      <NavLink to="/agents" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}><Bot size={18} /> Agents</NavLink>
-      <NavLink to="/intake" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}><Inbox size={18} /> Intake</NavLink>
-      <NavLink to="/email-agent" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}><MailCheck size={18} /> Email Agent</NavLink>
-      <NavLink to="/issues" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}><AlertCircle size={18} /> Issues</NavLink>
-      <NavLink to="/timeline" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}><CalendarRange size={18} /> Issue Timeline</NavLink>
-      <NavLink to="/properties" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}><Building2 size={18} /> Properties</NavLink>
-      <NavLink to="/tenants" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}><Users size={18} /> Tenants</NavLink>
-      <NavLink to="/contractors" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}><HardHat size={18} /> Contractors</NavLink>
-      <NavLink to="/compliance" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}><ShieldCheck size={18} /> Compliance</NavLink>
-      <NavLink to="/analytics" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}><BarChart3 size={18} /> Analytics</NavLink>
-      <NavLink to="/utilities" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}><Zap size={18} /> Utilities</NavLink>
-      <NavLink to="/check-ins" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}><ClipboardCheck size={18} /> Check-In</NavLink>
-      <NavLink to="/check-outs" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}><ClipboardList size={18} /> Check-Out</NavLink>
-      <NavLink to="/finance" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}><Landmark size={18} /> Finance</NavLink>
-      {user?.role === 'admin' && <NavLink to="/settings" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}><Settings size={18} /> Settings</NavLink>}
+      <NavSection label="Command">
+        <SidebarLink to="/" end icon={LayoutDashboard} label="Dashboard" />
+        <SidebarLink to="/os" icon={Workflow} label="FFR OS" />
+        <SidebarLink to="/email-agent" icon={MailCheck} label="Email Agent" />
+        <SidebarLink to="/intake" icon={Inbox} label="Intake" />
+        <SidebarLink to="/agents" icon={Bot} label="Agents" />
+      </NavSection>
+
+      <NavSection label="Property Work">
+        <SidebarLink to="/issues" icon={AlertCircle} label="Issues" />
+        <SidebarLink to="/properties" icon={Building2} label="Properties" />
+        <SidebarLink to="/tenants" icon={Users} label="Tenants" />
+      </NavSection>
+
+      <NavSection label="Operations">
+        <SidebarLink to="/contractors" icon={HardHat} label="Contractors" />
+        <SidebarLink to="/compliance" icon={ShieldCheck} label="Compliance" />
+        <SidebarLink to="/finance" icon={Landmark} label="Finance" />
+        <SidebarLink to="/utilities" icon={Zap} label="Utilities" />
+      </NavSection>
+
+      <NavSection label="Records">
+        <SidebarLink to="/check-ins" icon={ClipboardCheck} label="Check-In" />
+        <SidebarLink to="/check-outs" icon={ClipboardList} label="Check-Out" />
+        <SidebarLink to="/timeline" icon={CalendarRange} label="Timeline" />
+        <SidebarLink to="/analytics" icon={BarChart3} label="Analytics" />
+        {user?.role === 'admin' && <SidebarLink to="/settings" icon={Settings} label="Settings" />}
+      </NavSection>
     </>
   );
 

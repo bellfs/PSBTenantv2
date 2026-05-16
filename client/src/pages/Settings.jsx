@@ -305,7 +305,7 @@ export default function Settings() {
         <div className="card" style={{marginBottom:16}}>
           <div className="card-header"><h3><Mail size={16} style={{verticalAlign:'middle',marginRight:6}}/>Connect Gmail Account</h3></div>
           <div className="card-body">
-            <p style={{fontSize:13,color:'var(--text-secondary)',marginBottom:12}}>Connect admin@52oldelvet.com (or any Gmail account) via Google OAuth. The AI will scan the inbox for tenant maintenance emails and automatically create issues.</p>
+            <p style={{fontSize:13,color:'var(--text-secondary)',marginBottom:12}}>Connect admin@52oldelvet.com via Google OAuth. The AI will scan the inbox, create maintenance issues, and place suggested replies in the Gmail Drafts folder when a reply is needed.</p>
             <div style={{background:'rgba(99,102,241,0.06)',border:'1px solid rgba(99,102,241,0.15)',borderRadius:8,padding:'12px 14px',marginBottom:14,fontSize:12,color:'var(--text-secondary)',lineHeight:1.5}}>
               <strong style={{color:'var(--text-primary)'}}>Requires on Railway:</strong><br/>
               GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET env vars from <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noreferrer" style={{color:'var(--accent-light)'}}>Google Cloud Console</a><br/>

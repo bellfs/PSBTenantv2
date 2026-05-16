@@ -111,21 +111,34 @@ body::before {
 }
 .sidebar-nav {
   flex: 1;
-  padding: 16px 12px;
+  padding: 14px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+}
+.sidebar-section {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  overflow-y: auto;
+}
+.sidebar-section-label {
+  padding: 0 12px 5px;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
 }
 .sidebar-link {
   display: flex;
   align-items: center;
-  gap: 11px;
-  padding: 10px 14px;
+  gap: 10px;
+  padding: 8px 12px;
   border-radius: var(--radius-md);
   color: var(--text-secondary);
   text-decoration: none;
-  font-size: 13.5px;
+  font-size: 13px;
   font-weight: 450;
   transition: all 0.2s ease;
   cursor: pointer;
@@ -155,7 +168,8 @@ body::before {
   background: var(--gradient-accent);
   border-radius: 0 4px 4px 0;
 }
-.sidebar-link svg { width: 18px; height: 18px; opacity: 0.5; flex-shrink: 0; }
+.sidebar-link svg { width: 17px; height: 17px; opacity: 0.5; flex-shrink: 0; }
+.sidebar-link span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sidebar-link:hover svg { opacity: 0.8; }
 .sidebar-link.active svg { opacity: 1; }
 .sidebar-footer { padding: 16px; border-top: var(--glass-border); }
