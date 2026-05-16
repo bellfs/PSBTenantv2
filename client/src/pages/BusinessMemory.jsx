@@ -23,6 +23,7 @@ function fileLabel(path) {
 function kindForPath(path) {
   if (path === 'INDEX.json') return 'Index';
   if (path === 'AGENTS.md') return 'Agent Rules';
+  if (path.startsWith('wiki/context')) return 'Context';
   if (path.startsWith('wiki/entities/properties')) return 'Property';
   if (path.startsWith('wiki/entities/tenants')) return 'Tenant';
   if (path.startsWith('wiki/entities/contractors')) return 'Contractor';
@@ -115,7 +116,7 @@ export default function BusinessMemory() {
       <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16 }}>
         <div>
           <h2>Business Memory</h2>
-          <p>Generated Markdown and JSON memory for Codex-backed property operations.</p>
+          <p>Generated Markdown, JSON and deep operating context for Codex-backed property operations.</p>
         </div>
         <button className="btn btn-primary" onClick={generate} disabled={generating}>
           <RefreshCw size={15} className={generating ? 'spin' : ''} /> {generating ? 'Generating' : 'Generate Snapshot'}

@@ -11,6 +11,38 @@ const DEFAULT_LIMITS = {
   issueFiles: 250
 };
 
+const OLD_ELVET_APARTMENTS = [
+  'The Villiers', 'The Barrington', 'The Egerton', 'The Wolsey', 'The Tunstall', 'The Montague',
+  'The Morton', 'The Gray', 'The Langley', 'The Kirkham', 'The Fordham', 'The Talbot Penthouse'
+];
+
+const UTILITY_SUPPLIER_KEYWORDS = [
+  'gas', 'electric', 'electricity', 'water', 'utility', 'utilities', 'supplier', 'standing charge',
+  'sefe', 'crown', 'octopus', 'edf', 'british gas', 'eon', 'ovo', 'bulb', 'plusnet', 'onestream',
+  'broadband', 'wifi', 'internet', 'broker', 'change of tenancy', 'cot'
+];
+
+const PROPERTY_CONTEXT_NOTES = {
+  '52 Old Elvet': [
+    'Core PSB52 operating property in Durham City with named apartments rather than a generic house layout.',
+    'Apartment names are important for matching tenant, meter and maintenance context.',
+    'Treat building-wide issues, landlord supply, apartment-level meters and turnaround readiness as separate contexts.'
+  ],
+  '35 St Andrews Court': [
+    'Durham City / St Andrews Court property. Do not confuse this with St Andrews in Scotland.',
+    'Current platform data treats it as a single property record; exact bedroom count should be confirmed in property records.',
+    'Utility context is electric-led in the current seed data, with MPAN captured from meter readings.'
+  ],
+  '7 Cathedrals': [
+    'Durham City property with electric meter history in the current platform data.',
+    'Exact bedroom count should be confirmed in property records if active tenancy count is not enough.'
+  ],
+  '2 St Margarets Mews': [
+    'Durham City property with gas meter reference present in the current platform data.',
+    'Exact bedroom count should be confirmed in property records if active tenancy count is not enough.'
+  ]
+};
+
 function memoryRoot() {
   if (process.env.BUSINESS_MEMORY_ROOT) return path.resolve(process.env.BUSINESS_MEMORY_ROOT);
   if (process.env.DATABASE_PATH) return path.join(path.dirname(path.resolve(process.env.DATABASE_PATH)), 'business-memory');
@@ -80,8 +112,8 @@ function safeScalar(db, sql, params = [], fallback = 0) {
 
 function collectTableCounts(db) {
   const tables = [
-    'properties', 'tenants', 'tenancies', 'issues', 'messages', 'contractors', 'quotes',
-    'compliance_certificates', 'documents', 'meter_readings', 'utility_rates',
+    'properties', 'tenants', 'tenancies', 'staff', 'issues', 'messages', 'contractors', 'quotes',
+    'compliance_certificates', 'documents', 'meter_readings', 'utility_rates', 'utility_alerts', 'fair_usage_limits',
     'bank_transactions', 'inspections', 'intake_items', 'intake_extractions',
     'email_agent_items', 'email_agent_drafts', 'email_agent_reports',
     'agent_tasks', 'agent_approvals', 'agent_events', 'agent_runs'
@@ -144,6 +176,11 @@ function collectData() {
       GROUP BY c.id
       ORDER BY c.active DESC, c.name COLLATE NOCASE
     `);
+    const staff = safeAll(db, `
+      SELECT id, name, email, phone, role, active, last_login, created_at
+      FROM staff
+      ORDER BY active DESC, role, name COLLATE NOCASE
+    `);
     const quotes = safeAll(db, `
       SELECT q.*, c.name as contractor_name, c.trade, i.uuid as issue_uuid, i.title as issue_title
       FROM quotes q
@@ -178,6 +215,42 @@ function collectData() {
       GROUP BY mr.property_id, mr.property_name, mr.meter_type
       ORDER BY property_name COLLATE NOCASE, mr.meter_type
     `);
+    const meterRefs = safeAll(db, `
+      SELECT mr.property_id,
+        COALESCE(p.name, mr.property_name, 'Unknown property') as property_name,
+        mr.property_name as meter_label,
+        mr.meter_type,
+        mr.mprn,
+        mr.mpan,
+        mr.water_ref,
+        COUNT(*) as reading_count,
+        MAX(printf('%04d-%02d', mr.year, mr.month)) as latest_period
+      FROM meter_readings mr
+      LEFT JOIN properties p ON p.id = mr.property_id
+      WHERE COALESCE(mr.mprn, mr.mpan, mr.water_ref, '') != ''
+      GROUP BY mr.property_id, mr.property_name, mr.meter_type, mr.mprn, mr.mpan, mr.water_ref
+      ORDER BY property_name COLLATE NOCASE, mr.property_name COLLATE NOCASE, mr.meter_type
+    `);
+    const utilityRates = safeAll(db, `
+      SELECT ur.id, ur.rate_type, ur.rate_value, ur.effective_from, ur.effective_to,
+        ur.property_id, COALESCE(p.name, ur.property_name) as property_name, ur.notes, ur.created_at
+      FROM utility_rates ur
+      LEFT JOIN properties p ON p.id = ur.property_id
+      ORDER BY COALESCE(p.name, ur.property_name, 'Global') COLLATE NOCASE, ur.rate_type, ur.effective_from DESC
+    `);
+    const utilityAlerts = safeAll(db, `
+      SELECT ua.*, p.name as property_name
+      FROM utility_alerts ua
+      LEFT JOIN properties p ON p.id = ua.property_id
+      ORDER BY ua.year DESC, ua.month DESC
+      LIMIT ?
+    `, [DEFAULT_LIMITS.recentRows]);
+    const fairUsageLimits = safeAll(db, `
+      SELECT ful.*, p.name as property_name
+      FROM fair_usage_limits ful
+      LEFT JOIN properties p ON p.id = ful.property_id
+      ORDER BY p.name COLLATE NOCASE, ful.meter_type
+    `);
     const bankSummary = safeAll(db, `
       SELECT COALESCE(p.name, 'Unassigned') as property_name,
         COALESCE(bt.ai_category, bt.category, 'Uncategorised') as category,
@@ -196,6 +269,49 @@ function collectData() {
       LEFT JOIN bank_accounts ba ON ba.id = bt.bank_account_id
       LEFT JOIN properties p ON p.id = bt.property_id
       LEFT JOIN issues i ON i.id = bt.issue_id
+      ORDER BY bt.date DESC, bt.created_at DESC
+      LIMIT ?
+    `, [DEFAULT_LIMITS.recentRows]);
+    const supplierMentions = safeAll(db, `
+      SELECT bt.*, ba.account_name, p.name as property_name
+      FROM bank_transactions bt
+      LEFT JOIN bank_accounts ba ON ba.id = bt.bank_account_id
+      LEFT JOIN properties p ON p.id = bt.property_id
+      WHERE lower(
+        COALESCE(bt.counterparty, '') || ' ' ||
+        COALESCE(bt.reference, '') || ' ' ||
+        COALESCE(bt.description, '') || ' ' ||
+        COALESCE(bt.category, '') || ' ' ||
+        COALESCE(bt.ai_category, '')
+      ) LIKE '%gas%'
+      OR lower(
+        COALESCE(bt.counterparty, '') || ' ' ||
+        COALESCE(bt.reference, '') || ' ' ||
+        COALESCE(bt.description, '') || ' ' ||
+        COALESCE(bt.category, '') || ' ' ||
+        COALESCE(bt.ai_category, '')
+      ) LIKE '%electric%'
+      OR lower(
+        COALESCE(bt.counterparty, '') || ' ' ||
+        COALESCE(bt.reference, '') || ' ' ||
+        COALESCE(bt.description, '') || ' ' ||
+        COALESCE(bt.category, '') || ' ' ||
+        COALESCE(bt.ai_category, '')
+      ) LIKE '%water%'
+      OR lower(
+        COALESCE(bt.counterparty, '') || ' ' ||
+        COALESCE(bt.reference, '') || ' ' ||
+        COALESCE(bt.description, '') || ' ' ||
+        COALESCE(bt.category, '') || ' ' ||
+        COALESCE(bt.ai_category, '')
+      ) LIKE '%broadband%'
+      OR lower(
+        COALESCE(bt.counterparty, '') || ' ' ||
+        COALESCE(bt.reference, '') || ' ' ||
+        COALESCE(bt.description, '') || ' ' ||
+        COALESCE(bt.category, '') || ' ' ||
+        COALESCE(bt.ai_category, '')
+      ) LIKE '%supplier%'
       ORDER BY bt.date DESC, bt.created_at DESC
       LIMIT ?
     `, [DEFAULT_LIMITS.recentRows]);
@@ -288,12 +404,18 @@ function collectData() {
       issues,
       messages,
       contractors,
+      staff,
       quotes,
       certificates,
       documents,
       utilitySummary,
+      meterRefs,
+      utilityRates,
+      utilityAlerts,
+      fairUsageLimits,
       bankSummary,
       bankTransactions,
+      supplierMentions,
       inspections,
       intakeItems,
       intakeExtractions,
@@ -411,6 +533,84 @@ function readJsonField(row, field) {
   try { return JSON.parse(row[field]); } catch { return null; }
 }
 
+function uniqueList(values) {
+  return [...new Set(values.map(item => value(item).trim()).filter(Boolean))];
+}
+
+function activeRows(rows) {
+  return rows.filter(row => row.active !== 0);
+}
+
+function structuredBedroomCount(property) {
+  const candidates = [
+    property.bedrooms,
+    property.bedroom_count,
+    property.num_bedrooms,
+    property.number_of_bedrooms
+  ];
+  return candidates.find(candidate => candidate != null && candidate !== '' && !Number.isNaN(Number(candidate))) || null;
+}
+
+function currentPropertyFacts(property, data) {
+  const tenants = activeRows(data.tenants.filter(tenant => tenant.property_id === property.id));
+  const tenancies = activeRows(data.tenancies.filter(tenancy => tenancy.property_id === property.id));
+  const unitNames = property.name === '52 Old Elvet'
+    ? OLD_ELVET_APARTMENTS
+    : uniqueList([
+        ...tenancies.map(tenancy => tenancy.flat_number),
+        ...tenants.map(tenant => tenant.flat_number)
+      ]);
+  const exactBedrooms = structuredBedroomCount(property);
+  const inferredBedrooms = tenancies.length || tenants.length || null;
+  const bedroomCount = exactBedrooms || inferredBedrooms;
+  const meterRefs = data.meterRefs.filter(ref => ref.property_id === property.id || ref.property_name === property.name);
+  const utilityRates = data.utilityRates.filter(rate => rate.property_id === property.id || rate.property_name === property.name || (!rate.property_id && !rate.property_name));
+  const contextNotes = PROPERTY_CONTEXT_NOTES[property.name] || [
+    'Durham City portfolio property. Confirm exact bedroom count, licence requirements and supplier contract details from source documents before external action.'
+  ];
+
+  return {
+    property_id: property.id,
+    name: property.name,
+    address: property.address,
+    postcode: property.postcode,
+    units_recorded: property.num_units || '',
+    unit_names: unitNames,
+    bedrooms: bedroomCount,
+    bedrooms_source: exactBedrooms ? 'structured_property_record' : inferredBedrooms ? 'occupancy_inference' : 'not_recorded',
+    bedroom_basis: exactBedrooms
+      ? 'Stored on the property record.'
+      : inferredBedrooms
+      ? 'Inferred from active tenancy/occupancy records in FFR Property OS; confirm against property records for legal or marketing use.'
+      : 'Not available from current structured records; capture exact bedroom count in property records.',
+    active_tenants: tenants.length,
+    active_tenancies: tenancies.length,
+    meter_refs: meterRefs,
+    utility_rates: utilityRates,
+    context_notes: contextNotes
+  };
+}
+
+function propertyFactsRows(data) {
+  return data.properties.map(property => currentPropertyFacts(property, data));
+}
+
+function supplierText(row) {
+  return [
+    row.counterparty,
+    row.reference,
+    row.description,
+    row.category,
+    row.ai_category,
+    row.notes
+  ].map(part => value(part).toLowerCase()).join(' ');
+}
+
+function supplierKeywordHits(row) {
+  const text = supplierText(row);
+  return UTILITY_SUPPLIER_KEYWORDS.filter(keyword => text.includes(keyword));
+}
+
 function buildRootReadme(generatedAt, root) {
   return `${frontmatter({
     title: 'FFR Business Memory',
@@ -426,6 +626,7 @@ The platform database and uploaded documents remain the source of truth. This fo
 ## Shape
 
 - \`wiki/\` contains compiled operating knowledge by entity and lane.
+- \`wiki/context/\` contains Durham, property-facts, supplier and workmen/team context agents should read first.
 - \`raw/\` contains source manifests, source counts and recent communication snippets.
 - \`agents/\` contains agent run, task, approval and event memory.
 - \`daily/\` contains dated business digests.
@@ -447,11 +648,12 @@ function buildAgentsReadme(generatedAt) {
 Use this filesystem as business context before acting inside FFR Property OS.
 
 1. Start with \`wiki/index.md\` and \`INDEX.json\`.
-2. Treat SQLite, connected inboxes and uploaded documents as canonical where there is a conflict.
-3. Cite source ids, file paths, task ids, issue ids and email message ids in any recommendation.
-4. Do not send messages, approve spend, alter rent/deposit positions or instruct contractors without a platform approval.
-5. Store working notes in \`notes/\`; snapshots preserve that folder.
-6. Prefer small, sourced updates to broad unsourced conclusions.
+2. Read \`wiki/context/property-operating-facts.md\`, \`wiki/context/durham-city.md\`, \`wiki/context/energy-contracts-and-suppliers.md\` and \`wiki/context/workmen-team-contractors.md\` before property, supplier or contractor work.
+3. Treat SQLite, connected inboxes and uploaded documents as canonical where there is a conflict.
+4. Cite source ids, file paths, task ids, issue ids and email message ids in any recommendation.
+5. Do not send messages, approve spend, alter rent/deposit positions or instruct contractors without a platform approval.
+6. Store working notes in \`notes/\`; snapshots preserve that folder.
+7. Prefer small, sourced updates to broad unsourced conclusions.
 
 This follows the practical knowledge pattern from Karpathy's recent LLM wiki work: keep knowledge in files that humans and agents can read, diff, link and refresh.
 `;
@@ -511,6 +713,13 @@ ${section('Pending Approvals', bulletList(pendingApprovals.slice(0, 20), approva
 
 ${section('Open Issues', bulletList(openIssues.slice(0, 25), issue => `#${issue.id} ${issue.title} at ${issue.property_name || 'unknown property'} (${issue.status}, ${issue.priority})`))}
 
+## Core Context Files
+
+${table(indexEntries.filter(entry => entry.type === 'context'), [
+    { label: 'Context', value: 'title' },
+    { label: 'Path', value: 'path', max: 220 }
+  ])}
+
 ## Memory Files
 
 ${table(indexEntries.slice(0, 500), [
@@ -521,7 +730,316 @@ ${table(indexEntries.slice(0, 500), [
 `;
 }
 
+function buildPropertyFactsPage(data, generatedAt) {
+  const facts = propertyFactsRows(data);
+  return `${frontmatter({
+    title: 'Property Operating Facts',
+    type: 'property_operating_facts',
+    generated_at: generatedAt
+  })}# Property Operating Facts
+
+This file makes property identity, address, unit shape, tenant occupancy and bedroom assumptions explicit for agents.
+
+## Property Facts
+
+${table(facts, [
+    { label: 'Property', value: 'name' },
+    { label: 'Address', value: 'address', max: 220 },
+    { label: 'Postcode', value: 'postcode' },
+    { label: 'Units recorded', value: 'units_recorded' },
+    { label: 'Bedrooms', value: 'bedrooms' },
+    { label: 'Bedroom source', value: 'bedrooms_source' },
+    { label: 'Bedroom basis', value: 'bedroom_basis', max: 320 },
+    { label: 'Unit names', value: row => row.unit_names.join(', '), max: 360 }
+  ])}
+
+## Data Gaps
+
+- Exact bedroom counts should become structured property metadata rather than only inferred from current tenancies.
+- Licence/HMO status, fire strategy, broadband supplier and utility contract end dates should be added as source documents or structured records.
+- Agents must not use inferred bedrooms for legal, advertising or contract wording without confirmation.
+`;
+}
+
+function buildDurhamContextPage(data, generatedAt) {
+  const postcodes = uniqueList(data.properties.map(property => property.postcode || 'Unknown'));
+  const dh1Properties = data.properties.filter(property => value(property.postcode).startsWith('DH1') || value(property.address).toLowerCase().includes('durham'));
+  const academicYears = uniqueList(data.tenancies.map(tenancy => tenancy.academic_year));
+
+  return `${frontmatter({
+    title: 'Durham City Operating Context',
+    type: 'durham_city_context',
+    generated_at: generatedAt
+  })}# Durham City Operating Context
+
+## Portfolio Geography
+
+${table([
+    { label: 'Properties in memory', value: data.properties.length },
+    { label: 'Durham/DH1 properties', value: dh1Properties.length },
+    { label: 'Postcodes', value: postcodes.join(', ') },
+    { label: 'Academic years in tenancies', value: academicYears.join(', ') }
+  ], [
+    { label: 'Field', value: 'label' },
+    { label: 'Value', value: 'value', max: 320 }
+  ])}
+
+## Deep Operating Context
+
+- The current portfolio memory is Durham City centred, with Old Elvet, Flass, Claypath, St Andrews Court, Cathedrals, St Margarets Mews and Hallgarth records.
+- Student tenancy cycles matter: summer turnaround, check-in/check-out, keys, cleaning, utilities, deposits and maintenance readiness should be considered together.
+- Street/property names and flat names are operationally important. Agents should match fuzzy references such as "Old Elvet", "Claypath", "Flass", "St Andrews" and 52 Old Elvet apartment names against property records.
+- For external replies, agents should cite the exact property, flat/apartment, tenant and source record rather than using generic Durham wording.
+- Durham City context should be enriched over time with parking/access notes, contractor access patterns, bin/store locations, neighbour sensitivities, HMO/licence evidence and property-specific supplier contracts.
+
+## Property List
+
+${table(data.properties, [
+    { label: 'Property', value: 'name' },
+    { label: 'Address', value: 'address', max: 260 },
+    { label: 'Postcode', value: 'postcode' },
+    { label: 'Units', value: 'num_units' }
+  ])}
+`;
+}
+
+function buildStAndrewsContextPage(data, generatedAt) {
+  const property = data.properties.find(row => row.name === '35 St Andrews Court') || {};
+  const facts = property.id ? currentPropertyFacts(property, data) : null;
+  const tenants = property.id ? data.tenants.filter(tenant => tenant.property_id === property.id) : [];
+  const tenancies = property.id ? data.tenancies.filter(tenancy => tenancy.property_id === property.id) : [];
+  const utilities = property.id ? data.utilitySummary.filter(row => row.property_id === property.id) : [];
+  const tasks = property.id ? data.agentTasks.filter(task => task.property_id === property.id) : [];
+
+  return `${frontmatter({
+    title: 'St Andrews Court Context',
+    type: 'property_deep_context',
+    property_id: property.id || '',
+    generated_at: generatedAt
+  })}# 35 St Andrews Court Deep Context
+
+## Identity
+
+${facts ? table([
+    { label: 'Property', value: facts.name },
+    { label: 'Address', value: facts.address },
+    { label: 'Postcode', value: facts.postcode },
+    { label: 'Units recorded', value: facts.units_recorded },
+    { label: 'Bedrooms', value: facts.bedrooms || '' },
+    { label: 'Bedroom source', value: facts.bedrooms_source || '' },
+    { label: 'Bedroom basis', value: facts.bedroom_basis },
+    { label: 'Context note', value: facts.context_notes.join(' ') }
+  ], [
+    { label: 'Field', value: 'label' },
+    { label: 'Value', value: 'value', max: 420 }
+  ]) : '_35 St Andrews Court is not present in the current database._'}
+
+## Current Tenants and Tenancies
+
+${table(tenants, [
+    { label: 'Tenant', value: 'name' },
+    { label: 'Email', value: 'email' },
+    { label: 'Phone', value: 'phone' },
+    { label: 'Flat', value: 'flat_number' },
+    { label: 'Active', value: row => row.active === 0 ? 'No' : 'Yes' }
+  ])}
+
+${table(tenancies, [
+    { label: 'Tenant', value: 'tenant_name' },
+    { label: 'Year', value: 'academic_year' },
+    { label: 'Start', value: 'tenancy_start' },
+    { label: 'End', value: 'tenancy_end' },
+    { label: 'Weekly rent', value: row => money(row.rent_weekly) }
+  ])}
+
+## Energy and Meters
+
+${facts ? table(facts.meter_refs, [
+    { label: 'Meter label', value: 'meter_label' },
+    { label: 'Type', value: 'meter_type' },
+    { label: 'MPRN', value: 'mprn' },
+    { label: 'MPAN', value: 'mpan' },
+    { label: 'Water ref', value: 'water_ref' },
+    { label: 'Latest', value: 'latest_period' }
+  ]) : '_None recorded._'}
+
+${table(utilities, [
+    { label: 'Meter', value: 'meter_type' },
+    { label: 'Readings', value: 'reading_count' },
+    { label: 'Usage kWh', value: row => Number(row.total_usage_kwh || 0).toFixed(1) },
+    { label: 'Cost', value: row => money(row.total_cost) },
+    { label: 'Latest', value: 'latest_period' }
+  ])}
+
+## Open Work
+
+${table(tasks, [
+    { label: 'Task', value: 'title' },
+    { label: 'Domain', value: 'domain' },
+    { label: 'Priority', value: 'priority' },
+    { label: 'Status', value: 'status' }
+  ])}
+
+## Caution
+
+- "St Andrews" references should first be matched to 35 St Andrews Court in Durham unless the source clearly refers to something else.
+- Exact bedroom count, licence status, supplier contract term and access notes should be confirmed from source documents before external action.
+`;
+}
+
+function buildEnergySuppliersPage(data, generatedAt) {
+  const utilityTasks = data.agentTasks.filter(task => task.domain === 'utilities' || /utility|supplier|gas|electric|water|broadband/i.test(`${task.title} ${task.description || ''}`));
+  const utilityEmails = data.emailItems.filter(item => item.domain === 'utilities' || /utility|supplier|gas|electric|water|broadband|sefe|crown|octopus|edf|british gas/i.test(`${item.subject} ${item.summary || ''} ${item.body_preview || ''}`));
+  const utilityIntake = data.intakeExtractions.filter(item => item.domain === 'utilities' || /utility|supplier|gas|electric|water|broadband|sefe|crown|octopus|edf|british gas/i.test(`${item.title} ${item.summary || ''}`));
+
+  return `${frontmatter({
+    title: 'Energy Contracts and Suppliers',
+    type: 'energy_supplier_context',
+    generated_at: generatedAt
+  })}# Energy Contracts and Suppliers
+
+## Supplier Memory Rule
+
+Energy and supplier decisions need source discipline. Before accepting a contract, disputing a bill, sending a supplier message, or making a pricing assumption, agents must check the rate records, meter references, invoices/documents, bank transactions and email/WhatsApp context.
+
+## Utility Rates and Contract Clues
+
+${table(data.utilityRates, [
+    { label: 'Property', value: row => row.property_name || 'Global/default' },
+    { label: 'Rate', value: 'rate_type' },
+    { label: 'Value', value: 'rate_value' },
+    { label: 'From', value: 'effective_from' },
+    { label: 'To', value: 'effective_to' },
+    { label: 'Notes', value: 'notes', max: 320 }
+  ])}
+
+## Meter References
+
+${table(data.meterRefs, [
+    { label: 'Property', value: 'property_name' },
+    { label: 'Meter label', value: 'meter_label' },
+    { label: 'Type', value: 'meter_type' },
+    { label: 'MPRN', value: 'mprn' },
+    { label: 'MPAN', value: 'mpan' },
+    { label: 'Water ref', value: 'water_ref' },
+    { label: 'Latest', value: 'latest_period' }
+  ])}
+
+## Usage Summary
+
+${table(data.utilitySummary, [
+    { label: 'Property', value: 'property_name' },
+    { label: 'Meter', value: 'meter_type' },
+    { label: 'Readings', value: 'reading_count' },
+    { label: 'Usage kWh', value: row => Number(row.total_usage_kwh || 0).toFixed(1) },
+    { label: 'Cost', value: row => money(row.total_cost) },
+    { label: 'Latest', value: 'latest_period' }
+  ])}
+
+## Supplier Mentions From Finance
+
+${table(data.supplierMentions, [
+    { label: 'Date', value: 'date' },
+    { label: 'Account', value: 'account_name' },
+    { label: 'Counterparty', value: 'counterparty', max: 220 },
+    { label: 'Property', value: 'property_name' },
+    { label: 'Amount', value: row => `${row.direction === 'OUT' ? '-' : ''}${money(row.amount)}` },
+    { label: 'Keywords', value: row => supplierKeywordHits(row).join(', ') }
+  ])}
+
+## Current Utility Tasks, Emails and Intake
+
+${section('Tasks', table(utilityTasks, [
+    { label: 'Task', value: 'title', max: 260 },
+    { label: 'Priority', value: 'priority' },
+    { label: 'Status', value: 'status' },
+    { label: 'Property', value: 'property_name' }
+  ]))}
+
+${section('Email Context', table(utilityEmails.slice(0, 40), [
+    { label: 'Subject', value: 'subject', max: 260 },
+    { label: 'From', value: 'from_address' },
+    { label: 'Summary', value: 'summary', max: 320 }
+  ]))}
+
+${section('WhatsApp / Intake Context', table(utilityIntake.slice(0, 40), [
+    { label: 'Title', value: 'title', max: 260 },
+    { label: 'Source', value: 'source_name' },
+    { label: 'Summary', value: 'summary', max: 320 }
+  ]))}
+`;
+}
+
+function buildWorkmenTeamPage(data, generatedAt) {
+  const contractorTasks = data.agentTasks.filter(task => task.domain === 'contractors' || /contractor|quote|plumber|electrician|joiner|roofer|cleaner|labour|workmen/i.test(`${task.title} ${task.description || ''}`));
+  const contractorIntake = data.intakeExtractions.filter(item => item.domain === 'contractors' || /contractor|quote|plumber|electrician|joiner|roofer|cleaner|labour|workmen/i.test(`${item.title} ${item.summary || ''}`));
+
+  return `${frontmatter({
+    title: 'Workmen Team and Contractors',
+    type: 'workmen_contractor_context',
+    generated_at: generatedAt
+  })}# Workmen Team and Contractors
+
+## Internal Team
+
+${table(data.staff, [
+    { label: 'Name', value: 'name' },
+    { label: 'Email', value: 'email' },
+    { label: 'Phone', value: 'phone' },
+    { label: 'Role', value: 'role' },
+    { label: 'Active', value: row => row.active ? 'Yes' : 'No' }
+  ])}
+
+## Contractor Directory
+
+${table(data.contractors, [
+    { label: 'Name', value: 'name' },
+    { label: 'Trade', value: 'trade' },
+    { label: 'Phone', value: 'phone' },
+    { label: 'Email', value: 'email' },
+    { label: 'Active', value: row => row.active ? 'Yes' : 'No' },
+    { label: 'Notes', value: 'notes', max: 260 },
+    { label: 'Quotes', value: 'quote_count' },
+    { label: 'Approved value', value: row => money(row.approved_value) }
+  ])}
+
+## Contractor Quote History
+
+${table(data.quotes, [
+    { label: 'Contractor', value: 'contractor_name' },
+    { label: 'Trade', value: 'trade' },
+    { label: 'Issue', value: 'issue_title', max: 260 },
+    { label: 'Amount', value: row => money(row.amount) },
+    { label: 'Status', value: 'status' },
+    { label: 'Created', value: 'created_at' }
+  ])}
+
+## Current Contractor Work
+
+${section('Tasks', table(contractorTasks, [
+    { label: 'Task', value: 'title', max: 260 },
+    { label: 'Priority', value: 'priority' },
+    { label: 'Status', value: 'status' },
+    { label: 'Owner', value: 'assigned_to' },
+    { label: 'Property', value: 'property_name' }
+  ]))}
+
+${section('WhatsApp / Intake Context', table(contractorIntake.slice(0, 40), [
+    { label: 'Title', value: 'title', max: 260 },
+    { label: 'Source', value: 'source_name' },
+    { label: 'Summary', value: 'summary', max: 320 }
+  ]))}
+
+## Guardrails
+
+- Do not instruct a contractor, accept a quote or approve spend without an approval record.
+- Check property, access, evidence, urgency, tenant impact and previous contractor notes before drafting instructions.
+- Keep day-rate, quality, responsiveness and completion evidence in the structured contractor record over time.
+`;
+}
+
 function buildPropertyPage(property, data, maps, generatedAt) {
+  const facts = currentPropertyFacts(property, data);
   const tenants = data.tenants.filter(tenant => tenant.property_id === property.id);
   const tenancies = data.tenancies.filter(tenancy => tenancy.property_id === property.id);
   const issues = data.issues.filter(issue => issue.property_id === property.id);
@@ -543,13 +1061,29 @@ ${property.address || ''}${property.postcode ? `, ${property.postcode}` : ''}
 ## Snapshot
 
 ${table([
+    { label: 'Address', value: facts.address || '' },
+    { label: 'Postcode', value: facts.postcode || '' },
     { label: 'Units', value: property.num_units || '' },
+    { label: 'Bedrooms', value: facts.bedrooms || '' },
     { label: 'Tenants', value: tenants.length },
     { label: 'Open issues', value: issues.filter(issue => !['resolved', 'closed'].includes(value(issue.status).toLowerCase())).length },
     { label: 'Documents', value: docs.length }
   ], [
     { label: 'Metric', value: 'label' },
     { label: 'Value', value: 'value' }
+  ])}
+
+## Operating Facts
+
+${table([
+    { label: 'Unit/apartment names', value: facts.unit_names.join(', ') || '' },
+    { label: 'Bedroom count basis', value: facts.bedroom_basis },
+    { label: 'Current active tenants', value: facts.active_tenants },
+    { label: 'Current active tenancies', value: facts.active_tenancies },
+    { label: 'Durham / local context notes', value: facts.context_notes.join(' ') }
+  ], [
+    { label: 'Field', value: 'label' },
+    { label: 'Value', value: 'value', max: 420 }
   ])}
 
 ${section('Tenants', table(tenants, [
@@ -579,6 +1113,23 @@ ${section('Compliance', table(certs, [
     { label: 'Status', value: 'status' },
     { label: 'Expiry', value: 'expiry_date' },
     { label: 'Provider', value: 'provider' }
+  ]))}
+
+${section('Meters and Supplier References', table(facts.meter_refs, [
+    { label: 'Meter label', value: 'meter_label' },
+    { label: 'Type', value: 'meter_type' },
+    { label: 'MPRN', value: 'mprn' },
+    { label: 'MPAN', value: 'mpan' },
+    { label: 'Water ref', value: 'water_ref' },
+    { label: 'Latest', value: 'latest_period' }
+  ]))}
+
+${section('Utility Rates and Contract Clues', table(facts.utility_rates, [
+    { label: 'Rate', value: 'rate_type' },
+    { label: 'Value', value: 'rate_value' },
+    { label: 'From', value: 'effective_from' },
+    { label: 'To', value: 'effective_to' },
+    { label: 'Notes', value: 'notes', max: 260 }
   ]))}
 
 ${section('Utilities', table(utilities, [
@@ -844,6 +1395,31 @@ function buildUtilitiesPage(data, generatedAt) {
     generated_at: generatedAt
   })}# Utilities Memory
 
+## Rates and Contract Clues
+
+${table(data.utilityRates, [
+    { label: 'Property', value: row => row.property_name || 'Global/default' },
+    { label: 'Rate', value: 'rate_type' },
+    { label: 'Value', value: 'rate_value' },
+    { label: 'From', value: 'effective_from' },
+    { label: 'To', value: 'effective_to' },
+    { label: 'Notes', value: 'notes', max: 320 }
+  ])}
+
+## Meter References
+
+${table(data.meterRefs, [
+    { label: 'Property', value: 'property_name' },
+    { label: 'Meter label', value: 'meter_label' },
+    { label: 'Type', value: 'meter_type' },
+    { label: 'MPRN', value: 'mprn' },
+    { label: 'MPAN', value: 'mpan' },
+    { label: 'Water ref', value: 'water_ref' },
+    { label: 'Latest', value: 'latest_period' }
+  ])}
+
+## Usage Summary
+
 ${table(data.utilitySummary, [
     { label: 'Property', value: 'property_name' },
     { label: 'Meter', value: 'meter_type' },
@@ -852,6 +1428,24 @@ ${table(data.utilitySummary, [
     { label: 'Cost', value: row => money(row.total_cost) },
     { label: 'Latest', value: 'latest_period' }
   ])}
+
+## Fair Usage and Alerts
+
+${section('Fair Usage Limits', table(data.fairUsageLimits, [
+    { label: 'Property', value: 'property_name' },
+    { label: 'Meter', value: 'meter_type' },
+    { label: 'Limit kWh', value: 'monthly_limit_kwh' },
+    { label: 'Academic year', value: 'academic_year' }
+  ]))}
+
+${section('Recent Alerts', table(data.utilityAlerts, [
+    { label: 'Property', value: 'property_name' },
+    { label: 'Meter', value: 'meter_type' },
+    { label: 'Period', value: row => `${row.year}-${String(row.month).padStart(2, '0')}` },
+    { label: 'Usage kWh', value: 'usage_kwh' },
+    { label: 'Average', value: 'avg_usage' },
+    { label: 'Threshold %', value: 'threshold_pct' }
+  ]))}
 `;
 }
 
@@ -1133,8 +1727,20 @@ function snapshotBusinessMemory(options = {}) {
       maps.contractorPath[contractor.id] = `wiki/entities/contractors/${contractorFileName(contractor)}`;
       indexEntries.push({ type: 'contractor', id: contractor.id, title: contractor.name, path: maps.contractorPath[contractor.id] });
     }
+    indexEntries.push(
+      { type: 'context', id: 'property-operating-facts', title: 'Property Operating Facts', path: 'wiki/context/property-operating-facts.md' },
+      { type: 'context', id: 'durham-city', title: 'Durham City Operating Context', path: 'wiki/context/durham-city.md' },
+      { type: 'context', id: 'st-andrews-court', title: '35 St Andrews Court Deep Context', path: 'wiki/context/st-andrews-court.md' },
+      { type: 'context', id: 'energy-contracts-and-suppliers', title: 'Energy Contracts and Suppliers', path: 'wiki/context/energy-contracts-and-suppliers.md' },
+      { type: 'context', id: 'workmen-team-contractors', title: 'Workmen Team and Contractors', path: 'wiki/context/workmen-team-contractors.md' }
+    );
 
     bytesWritten += writeFile(root, 'wiki/index.md', buildWikiIndex(data, generatedAt, indexEntries), writtenFiles);
+    bytesWritten += writeFile(root, 'wiki/context/property-operating-facts.md', buildPropertyFactsPage(data, generatedAt), writtenFiles);
+    bytesWritten += writeFile(root, 'wiki/context/durham-city.md', buildDurhamContextPage(data, generatedAt), writtenFiles);
+    bytesWritten += writeFile(root, 'wiki/context/st-andrews-court.md', buildStAndrewsContextPage(data, generatedAt), writtenFiles);
+    bytesWritten += writeFile(root, 'wiki/context/energy-contracts-and-suppliers.md', buildEnergySuppliersPage(data, generatedAt), writtenFiles);
+    bytesWritten += writeFile(root, 'wiki/context/workmen-team-contractors.md', buildWorkmenTeamPage(data, generatedAt), writtenFiles);
 
     for (const property of data.properties) {
       bytesWritten += writeFile(root, maps.propertyPath[property.id], buildPropertyPage(property, data, maps, generatedAt), writtenFiles);
