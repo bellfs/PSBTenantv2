@@ -298,11 +298,9 @@ async function initialiseDatabase() {
   db.exec('CREATE INDEX IF NOT EXISTS idx_documents_tenant ON documents(tenant_id)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_tenants_email ON tenants(email)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_email_sync_msg ON email_sync_log(message_id)');
-  db.exec('CREATE INDEX IF NOT EXISTS idx_email_accounts_owner ON email_accounts(connected_by_staff_id, connected_by_email)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_email_agent_items_message ON email_agent_items(message_id)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_email_agent_items_status ON email_agent_items(status)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_email_agent_items_domain ON email_agent_items(domain)');
-  db.exec('CREATE INDEX IF NOT EXISTS idx_email_agent_items_kind ON email_agent_items(message_kind, is_automated)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_email_agent_drafts_status ON email_agent_drafts(status)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_email_agent_reports_date ON email_agent_reports(report_date)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_calendar_events_start ON calendar_events(start_at)');
@@ -701,6 +699,9 @@ async function initialiseDatabase() {
       try { db.exec(s); console.log(`  Migrated: ${c}`); } catch(e2) {}
     }
   }
+
+  db.exec('CREATE INDEX IF NOT EXISTS idx_email_accounts_owner ON email_accounts(connected_by_staff_id, connected_by_email)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_email_agent_items_kind ON email_agent_items(message_kind, is_automated)');
 
   // Seed admin
   if (!db.prepare('SELECT id FROM staff WHERE email = ?').get(process.env.ADMIN_EMAIL || 'admin@52oldelvet.com')) {
