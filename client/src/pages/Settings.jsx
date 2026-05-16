@@ -314,7 +314,7 @@ export default function Settings() {
             <button className="btn btn-primary" onClick={connectGmail} disabled={emailLoading==='gmail'}>
               <Mail size={15}/> {emailLoading==='gmail' ? 'Connecting...' : 'Connect Gmail Account'}
             </button>
-            <p style={{fontSize:11,color:'var(--text-muted)',marginTop:8}}>You'll be redirected to Google to authorise read-only access to your inbox.</p>
+            <p style={{fontSize:11,color:'var(--text-muted)',marginTop:8}}>You'll be redirected to Google to authorise inbox reading and Gmail draft creation.</p>
           </div>
         </div>
 

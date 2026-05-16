@@ -53,14 +53,25 @@ async function handleGmailCallback(code) {
     email = profile.data.emailAddress;
   } catch (e) { console.log('[Gmail] Could not get profile:', e.message); }
 
-  // Store in DB (replace existing for same email)
+  // Store in DB without replacing the row. Sync logs, agent items and Gmail drafts
+  // point at email_accounts.id, so reconnecting must preserve the existing id.
   const db = getDb();
   try {
-    db.prepare('DELETE FROM email_accounts WHERE email_address = ?').run(email);
-    db.prepare('INSERT INTO email_accounts (provider, email_address, credentials, sync_enabled) VALUES (?, ?, ?, 1)')
-      .run('gmail', email, JSON.stringify(tokens));
+    const existing = db.prepare('SELECT id FROM email_accounts WHERE provider = ? AND LOWER(email_address) = LOWER(?)').get('gmail', email);
+    let id;
+    if (existing) {
+      db.prepare(`
+        UPDATE email_accounts
+        SET credentials = ?, sync_enabled = 1
+        WHERE id = ?
+      `).run(JSON.stringify(tokens), existing.id);
+      id = existing.id;
+    } else {
+      id = db.prepare('INSERT INTO email_accounts (provider, email_address, credentials, sync_enabled) VALUES (?, ?, ?, 1)')
+        .run('gmail', email, JSON.stringify(tokens)).lastInsertRowid;
+    }
     console.log(`[Gmail] Connected: ${email}`);
-    return { email, provider: 'gmail' };
+    return { id, email, provider: 'gmail' };
   } finally { db.close(); }
 }
 

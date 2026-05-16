@@ -52,13 +52,22 @@ router.post('/accounts/imap', authenticate, requireAdmin, async (req, res) => {
 
     const db = getDb();
     try {
-      // Remove existing account for same email to avoid duplicates
-      db.prepare('DELETE FROM email_accounts WHERE email_address = ?').run(email_address);
       const credentials = JSON.stringify({ host, port: port || 993, username, password });
-      const result = db.prepare('INSERT INTO email_accounts (provider, email_address, credentials, sync_enabled) VALUES (?, ?, ?, 1)')
-        .run('imap', email_address, credentials);
+      const existing = db.prepare('SELECT id FROM email_accounts WHERE provider = ? AND LOWER(email_address) = LOWER(?)').get('imap', email_address);
+      let id;
+      if (existing) {
+        db.prepare(`
+          UPDATE email_accounts
+          SET credentials = ?, sync_enabled = 1
+          WHERE id = ?
+        `).run(credentials, existing.id);
+        id = existing.id;
+      } else {
+        id = db.prepare('INSERT INTO email_accounts (provider, email_address, credentials, sync_enabled) VALUES (?, ?, ?, 1)')
+          .run('imap', email_address, credentials).lastInsertRowid;
+      }
       console.log(`[IMAP] Connected: ${email_address} via ${host}`);
-      res.json({ id: result.lastInsertRowid, email_address, provider: 'imap' });
+      res.json({ id, email_address, provider: 'imap' });
     } finally { db.close(); }
   } catch (e) {
     res.status(400).json({ error: `Connection test failed: ${e.message}` });
@@ -79,6 +88,14 @@ router.put('/accounts/:id', authenticate, requireAdmin, (req, res) => {
 router.delete('/accounts/:id', authenticate, requireAdmin, (req, res) => {
   const db = getDb();
   try {
+    db.prepare('UPDATE email_agent_drafts SET email_account_id = NULL WHERE email_account_id = ?').run(req.params.id);
+    db.prepare(`
+      UPDATE email_agent_items
+      SET email_account_id = NULL,
+          email_sync_log_id = NULL
+      WHERE email_account_id = ?
+         OR email_sync_log_id IN (SELECT id FROM email_sync_log WHERE email_account_id = ?)
+    `).run(req.params.id, req.params.id);
     db.prepare('DELETE FROM email_sync_log WHERE email_account_id = ?').run(req.params.id);
     db.prepare('DELETE FROM email_accounts WHERE id = ?').run(req.params.id);
     res.json({ success: true });
