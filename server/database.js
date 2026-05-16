@@ -243,9 +243,15 @@ async function initialiseDatabase() {
     provider TEXT NOT NULL DEFAULT 'google',
     email_address TEXT NOT NULL,
     calendar_id TEXT DEFAULT 'primary',
+    calendar_name TEXT,
     credentials TEXT NOT NULL,
     sync_enabled INTEGER DEFAULT 1,
     last_sync_at DATETIME,
+    connected_by_staff_id INTEGER,
+    connected_by_email TEXT,
+    connected_by_name TEXT,
+    sync_window_days INTEGER DEFAULT 30,
+    last_context_at DATETIME,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(provider, email_address, calendar_id)
   )`);
@@ -693,6 +699,12 @@ async function initialiseDatabase() {
     ['email_agent_items','is_automated','ALTER TABLE email_agent_items ADD COLUMN is_automated INTEGER DEFAULT 0'],
     ['email_agent_items','classification_source','ALTER TABLE email_agent_items ADD COLUMN classification_source TEXT DEFAULT \'heuristic\''],
     ['email_agent_items','memory_refs_json','ALTER TABLE email_agent_items ADD COLUMN memory_refs_json TEXT'],
+    ['calendar_accounts','calendar_name','ALTER TABLE calendar_accounts ADD COLUMN calendar_name TEXT'],
+    ['calendar_accounts','connected_by_staff_id','ALTER TABLE calendar_accounts ADD COLUMN connected_by_staff_id INTEGER'],
+    ['calendar_accounts','connected_by_email','ALTER TABLE calendar_accounts ADD COLUMN connected_by_email TEXT'],
+    ['calendar_accounts','connected_by_name','ALTER TABLE calendar_accounts ADD COLUMN connected_by_name TEXT'],
+    ['calendar_accounts','sync_window_days','ALTER TABLE calendar_accounts ADD COLUMN sync_window_days INTEGER DEFAULT 30'],
+    ['calendar_accounts','last_context_at','ALTER TABLE calendar_accounts ADD COLUMN last_context_at DATETIME'],
   ];
   for (const [t,c,s] of cols) {
     try { db.prepare(`SELECT ${c} FROM ${t} LIMIT 0`).all(); } catch(e) {
@@ -702,6 +714,7 @@ async function initialiseDatabase() {
 
   db.exec('CREATE INDEX IF NOT EXISTS idx_email_accounts_owner ON email_accounts(connected_by_staff_id, connected_by_email)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_email_agent_items_kind ON email_agent_items(message_kind, is_automated)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_calendar_accounts_owner ON calendar_accounts(connected_by_staff_id, connected_by_email)');
 
   // Seed admin
   if (!db.prepare('SELECT id FROM staff WHERE email = ?').get(process.env.ADMIN_EMAIL || 'admin@52oldelvet.com')) {

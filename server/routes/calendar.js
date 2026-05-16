@@ -1,6 +1,7 @@
 const express = require('express');
 const { getDb } = require('../database');
-const { authenticate, requireAdmin } = require('../middleware/auth');
+const jwt = require('jsonwebtoken');
+const { authenticate, requireAdmin, JWT_SECRET } = require('../middleware/auth');
 const calendar = require('../services/google-calendar');
 
 const router = express.Router();
@@ -15,18 +16,21 @@ router.get('/accounts', authenticate, (req, res) => {
 
 router.post('/google/auth-url', authenticate, requireAdmin, (req, res) => {
   try {
-    res.json({ url: calendar.getGoogleCalendarAuthUrl() });
+    res.json({ url: calendar.getGoogleCalendarAuthUrl(req.user, { calendar_id: req.body?.calendar_id }) });
   } catch (error) {
     res.status(400).json({ error: error.message });
   }
 });
 
 router.get('/google/callback', async (req, res) => {
-  const { code } = req.query;
+  const { code, state } = req.query;
   if (!code) return res.status(400).send('No authorization code provided');
+  if (!state) return res.status(400).send('No calendar owner state provided. Start the calendar connection again from FFR Property OS.');
 
   try {
-    const account = await calendar.handleGoogleCalendarCallback(code);
+    const owner = jwt.verify(state, JWT_SECRET);
+    if (owner.purpose !== 'google_calendar_oauth') throw new Error('Invalid Google Calendar OAuth state');
+    const account = await calendar.handleGoogleCalendarCallback(code, owner);
     const db = getDb();
     try {
       const fullAccount = db.prepare('SELECT * FROM calendar_accounts WHERE id = ?').get(account.id);
@@ -52,7 +56,7 @@ router.post('/accounts/:id/sync', authenticate, async (req, res) => {
   if (!account) return res.status(404).json({ error: 'Calendar account not found' });
 
   try {
-    res.json(await calendar.syncGoogleCalendarAccount(account, { days: req.body?.days || 14 }));
+    res.json(await calendar.syncGoogleCalendarAccount(account, { days: req.body?.days }));
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -60,7 +64,7 @@ router.post('/accounts/:id/sync', authenticate, async (req, res) => {
 
 router.post('/sync', authenticate, async (req, res) => {
   try {
-    res.json(await calendar.syncAllCalendars({ days: req.body?.days || 14 }));
+    res.json(await calendar.syncAllCalendars({ days: req.body?.days }));
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

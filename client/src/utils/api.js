@@ -157,7 +157,7 @@ export const api = {
 
   // Google Calendar
   getCalendarAccounts: () => request('/calendar/accounts'),
-  getGoogleCalendarAuthUrl: () => request('/calendar/google/auth-url', { method: 'POST' }),
+  getGoogleCalendarAuthUrl: (data = {}) => request('/calendar/google/auth-url', { method: 'POST', body: JSON.stringify(data) }),
   syncCalendars: () => request('/calendar/sync', { method: 'POST' }),
   getCalendarEvents: (limit = 25) => request(`/calendar/events?limit=${limit}`),
 

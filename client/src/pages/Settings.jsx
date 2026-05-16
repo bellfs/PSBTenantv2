@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../utils/api';
 import { useAuth } from '../App';
-import { Save, Plus, Mail, RefreshCw, Trash2, Power, PowerOff } from 'lucide-react';
+import { Save, Plus, Mail, RefreshCw, Trash2, Power, PowerOff, CalendarDays } from 'lucide-react';
 
 export default function Settings() {
   const { user } = useAuth();
@@ -21,13 +21,20 @@ export default function Settings() {
   const [emailError, setEmailError] = useState('');
   const [testEmailStatus, setTestEmailStatus] = useState('');
   const [newPhone, setNewPhone] = useState({ name: '', number: '' });
+  const [calendarAccounts, setCalendarAccounts] = useState([]);
+  const [calendarId, setCalendarId] = useState('primary');
+  const [calendarLoading, setCalendarLoading] = useState('');
+  const [calendarError, setCalendarError] = useState('');
 
   // Check URL params for Gmail callback result
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get('tab') === 'email') setTab('email');
+    if (params.get('tab') === 'calendar') setTab('calendar');
     if (params.get('gmail') === 'connected') { setEmailError(''); loadEmailAccounts(); }
     if (params.get('gmail') === 'error') setEmailError(params.get('msg') || 'Gmail connection failed');
+    if (params.get('calendar') === 'connected') { setCalendarError(''); loadCalendarAccounts(); }
+    if (params.get('calendar') === 'error') setCalendarError(params.get('msg') || 'Google Calendar connection failed');
   }, []);
 
   useEffect(() => {
@@ -37,13 +44,17 @@ export default function Settings() {
     }
   }, [isAdmin]);
   useEffect(() => { if (tab === 'email') loadEmailAccounts(); }, [tab]);
+  useEffect(() => { if (tab === 'calendar') loadCalendarAccounts(); }, [tab]);
   useEffect(() => {
-    if (!isAdmin && !['email', 'account'].includes(tab)) setTab('email');
+    if (!isAdmin && !['email', 'calendar', 'account'].includes(tab)) setTab('email');
   }, [isAdmin, tab]);
 
   const loadEmailAccounts = () => {
     api.getEmailAccounts().then(setEmailAccounts).catch(() => {});
     api.getEmailSyncLog().then(setSyncLog).catch(() => {});
+  };
+  const loadCalendarAccounts = () => {
+    api.getCalendarAccounts().then(setCalendarAccounts).catch(() => {});
   };
 
   const saveSettings = async () => {
@@ -102,11 +113,33 @@ export default function Settings() {
     loadEmailAccounts();
   };
 
+  const connectCalendar = async () => {
+    setCalendarLoading('connect'); setCalendarError('');
+    try {
+      const { url } = await api.getGoogleCalendarAuthUrl({ calendar_id: calendarId || 'primary' });
+      window.location.href = url;
+    } catch (e) {
+      setCalendarError(e.message);
+      setCalendarLoading('');
+    }
+  };
+
+  const syncCalendars = async () => {
+    setCalendarLoading('sync'); setCalendarError('');
+    try {
+      await api.syncCalendars();
+      loadCalendarAccounts();
+    } catch (e) {
+      setCalendarError(e.message);
+    }
+    setCalendarLoading('');
+  };
+
   const tabConfig = isAdmin ? [
     ['ai', 'AI Config'], ['whatsapp', 'WhatsApp'], ['notifications', 'Notifications'],
-    ['email', 'Email Sync'], ['team', 'Team'], ['account', 'Account']
+    ['email', 'Email Sync'], ['calendar', 'Calendar'], ['team', 'Team'], ['account', 'Account']
   ] : [
-    ['email', 'Email Sync'], ['account', 'Account']
+    ['email', 'Email Sync'], ['calendar', 'Calendar'], ['account', 'Account']
   ];
 
   return (
@@ -373,6 +406,55 @@ export default function Settings() {
             </tbody></table></div>
           </div>
         )}
+      </div>}
+
+      {tab === 'calendar' && <div>
+        {calendarError && <div style={{padding:12,marginBottom:16,background:'rgba(239,68,68,0.1)',border:'1px solid var(--danger)',borderRadius:8,color:'var(--danger)',fontSize:13}}>{calendarError}</div>}
+
+        <div className="card" style={{marginBottom:16}}>
+          <div className="card-header"><h3><CalendarDays size={16} style={{verticalAlign:'middle',marginRight:6}}/>Connected Calendars</h3></div>
+          {calendarAccounts.length > 0 ? (
+            <div className="table-container"><table><thead><tr><th>Calendar</th><th>Account</th><th>Connected By</th><th>Last Sync</th><th>Status</th></tr></thead><tbody>
+              {calendarAccounts.map(a => (
+                <tr key={a.id}>
+                  <td style={{fontWeight:500}}>{a.calendar_name || a.calendar_id || 'Primary calendar'}<div style={{fontSize:11,color:'var(--text-muted)'}}>{a.calendar_id}</div></td>
+                  <td>{a.email_address}</td>
+                  <td style={{fontSize:12,color:'var(--text-secondary)'}}>{a.connected_by_name || a.connected_by_email || 'Team account'}</td>
+                  <td style={{fontSize:12,color:'var(--text-secondary)'}}>{a.last_sync_at ? new Date(a.last_sync_at).toLocaleString('en-GB') : 'Never'}</td>
+                  <td>{a.sync_enabled ? <span className="badge badge-resolved">Active</span> : <span className="badge badge-closed">Paused</span>}</td>
+                </tr>
+              ))}
+            </tbody></table></div>
+          ) : (
+            <div className="card-body" style={{textAlign:'center',color:'var(--text-muted)',padding:32}}>No Google Calendar connected yet.</div>
+          )}
+        </div>
+
+        <div className="card">
+          <div className="card-header"><h3><CalendarDays size={16} style={{verticalAlign:'middle',marginRight:6}}/>Connect Shared Google Calendar</h3></div>
+          <div className="card-body">
+            <p style={{fontSize:13,color:'var(--text-secondary)',marginBottom:12}}>Connect the PSB/FFR shared calendar using the Google account that has access to it. The daily team brief will include today and tomorrow’s calendar context.</p>
+            <div className="form-group">
+              <label className="form-label">Calendar ID</label>
+              <input className="form-input" value={calendarId} onChange={e=>setCalendarId(e.target.value)} placeholder="primary or shared-calendar-id@group.calendar.google.com"/>
+              <p style={{fontSize:11,color:'var(--text-muted)',marginTop:6}}>Use <strong>primary</strong> for your main calendar, or paste the shared calendar ID from Google Calendar settings.</p>
+            </div>
+            <div style={{background:'rgba(99,102,241,0.06)',border:'1px solid rgba(99,102,241,0.15)',borderRadius:8,padding:'12px 14px',marginBottom:14,fontSize:12,color:'var(--text-secondary)',lineHeight:1.5}}>
+              <strong style={{color:'var(--text-primary)'}}>Google Cloud app requirements:</strong><br/>
+              Add redirect URI: https://maintenance.52oldelvet.com/api/calendar/google/callback<br/>
+              Add/read scopes: Google Calendar read-only and Google user email.
+            </div>
+            <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+              <button className="btn btn-primary" onClick={connectCalendar} disabled={calendarLoading==='connect' || !isAdmin}>
+                <CalendarDays size={15}/> {calendarLoading==='connect' ? 'Connecting...' : 'Connect Google Calendar'}
+              </button>
+              <button className="btn btn-secondary" onClick={syncCalendars} disabled={calendarLoading==='sync'}>
+                <RefreshCw size={15} className={calendarLoading==='sync'?'spin':''}/> {calendarLoading==='sync' ? 'Syncing...' : 'Sync Calendars'}
+              </button>
+            </div>
+            {!isAdmin && <p style={{fontSize:11,color:'var(--text-muted)',marginTop:8}}>Ask an admin to connect or replace the shared calendar.</p>}
+          </div>
+        </div>
       </div>}
 
       {tab === 'team' && <div>
