@@ -2,6 +2,7 @@ node_modules/
 .env
 server/data/*.db
 server/data/*.db-*
+server/data/business-memory/
 server/uploads/*
 !server/uploads/.gitkeep
 client/dist/

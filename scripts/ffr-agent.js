@@ -21,6 +21,9 @@ Usage:
   node scripts/ffr-agent.js intake:whatsapp <path-to-export.txt> [source_name]
   node scripts/ffr-agent.js email:run
   node scripts/ffr-agent.js email:report [--send]
+  node scripts/ffr-agent.js memory:summary
+  node scripts/ffr-agent.js memory:snapshot
+  node scripts/ffr-agent.js memory:file <path>
 
 Environment:
   FFR_OS_URL       Defaults to http://localhost:3001
@@ -35,6 +38,8 @@ Examples:
   npm run agent -- intake:whatsapp "/Users/fergusbell/Downloads/_chat 26.txt" team_group
   npm run agent -- email:run
   npm run agent -- email:report
+  npm run agent -- memory:snapshot
+  npm run agent -- memory:file wiki/index.md
 `.trim();
 }
 
@@ -124,6 +129,23 @@ async function main() {
   if (command === 'email:report') {
     const shouldSend = args.includes('--send');
     printJson(await request('post', shouldSend ? '/api/email-agent/reports/daily/send' : '/api/email-agent/reports/daily/preview', {}));
+    return;
+  }
+
+  if (command === 'memory:summary') {
+    printJson(await request('get', '/api/business-memory/summary'));
+    return;
+  }
+
+  if (command === 'memory:snapshot') {
+    printJson(await request('post', '/api/business-memory/snapshot', {}));
+    return;
+  }
+
+  if (command === 'memory:file') {
+    const memoryPath = args[0];
+    if (!memoryPath) throw new Error('Usage: node scripts/ffr-agent.js memory:file <path>');
+    printJson(await request('get', `/api/business-memory/file?path=${encodeURIComponent(memoryPath)}`));
     return;
   }
 

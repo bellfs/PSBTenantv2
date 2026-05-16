@@ -593,6 +593,19 @@ async function initialiseDatabase() {
   db.exec('CREATE INDEX IF NOT EXISTS idx_intake_extractions_domain ON intake_extractions(domain)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_intake_extractions_agent ON intake_extractions(agent_key)');
 
+  db.exec(`CREATE TABLE IF NOT EXISTS business_memory_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    root_path TEXT NOT NULL,
+    file_count INTEGER DEFAULT 0,
+    bytes_written INTEGER DEFAULT 0,
+    status TEXT DEFAULT 'completed',
+    error TEXT,
+    created_by TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_business_memory_snapshots_created ON business_memory_snapshots(created_at)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_business_memory_snapshots_status ON business_memory_snapshots(status)');
+
   // Migrate meter_readings unique constraint if table already exists without property_name in unique
   // (safe to run - just adds the column to the unique constraint concept via the CREATE TABLE IF NOT EXISTS above)
 

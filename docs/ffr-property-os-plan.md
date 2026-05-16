@@ -93,6 +93,27 @@ Every important business event should become an `agent_events` record:
 - Utility bill uploaded
 - Approval requested
 
+### 2a. Business Memory Filesystem
+
+FFR Property OS now has a Business Memory layer inspired by Andrej Karpathy's LLM wiki / knowledge-as-files pattern:
+
+- SQLite, connected inboxes and uploads stay canonical.
+- The platform generates a readable filesystem at `BUSINESS_MEMORY_ROOT`, or beside `DATABASE_PATH` as `business-memory` in production.
+- Generated files are Markdown for humans and Codex agents, plus `INDEX.json` for machine lookup.
+- Compiled folders (`wiki/`, `raw/`, `agents/`, `daily/`) can be regenerated after imports and syncs.
+- `notes/` is preserved for human and Codex working notes.
+- Generated memory is ignored by Git because it contains private business context.
+
+Useful commands:
+
+```bash
+npm run agent -- memory:summary
+npm run agent -- memory:snapshot
+npm run agent -- memory:file wiki/index.md
+```
+
+In the UI, the Business Memory page lets an admin generate a fresh snapshot and inspect the file tree without touching the underlying source data.
+
 ### 3. Tasks
 
 All operational work should become an `agent_tasks` record with:

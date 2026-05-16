@@ -899,6 +899,7 @@ tr:last-child td { border-bottom: none; }
 
 @media (max-width: 980px) {
   .agents-layout-grid { grid-template-columns: 1fr !important; }
+  .business-memory-grid { grid-template-columns: 1fr !important; }
 }
 
 /* mobile-copilot-bar: shown/hidden via media queries in mobile block above */

@@ -27,6 +27,7 @@ app.use('/api/os', require('./routes/os'));
 app.use('/api/agents', require('./routes/agents'));
 app.use('/api/intake', require('./routes/intake'));
 app.use('/api/email-agent', require('./routes/email-agent'));
+app.use('/api/business-memory', require('./routes/business-memory'));
 app.use('/api/compliance', require('./routes/compliance'));
 app.use('/api/utilities', require('./routes/utilities'));
 app.use('/api/inspections', require('./routes/inspections'));

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../App';
-import { LayoutDashboard, AlertCircle, Building2, Users, Settings, LogOut, Wrench, BarChart3, Menu, X, HardHat, ShieldCheck, CalendarRange, Zap, Sparkles, ClipboardCheck, ClipboardList, Landmark, Workflow, Bot, Inbox, MailCheck } from 'lucide-react';
+import { LayoutDashboard, AlertCircle, Building2, Users, Settings, LogOut, Wrench, BarChart3, Menu, X, HardHat, ShieldCheck, CalendarRange, Zap, Sparkles, ClipboardCheck, ClipboardList, Landmark, Workflow, Bot, Inbox, MailCheck, Database } from 'lucide-react';
 import CopilotPanel from './CopilotPanel';
 
 // Page-contextual placeholder suggestions that rotate
@@ -36,6 +36,12 @@ const PAGE_SUGGESTIONS = {
     'What replies need approval?',
     'Generate today\'s team email brief',
     'Which email follow-ups are open?',
+  ],
+  '/business-memory': [
+    'Generate a business memory snapshot',
+    'Show the latest property memory',
+    'Which files should Codex read first?',
+    'What changed in today\'s digest?',
   ],
   '/issues': [
     'Which issues are escalated?',
@@ -185,6 +191,7 @@ export default function Layout() {
         <SidebarLink to="/os" icon={Workflow} label="FFR OS" />
         <SidebarLink to="/email-agent" icon={MailCheck} label="Email Agent" />
         <SidebarLink to="/intake" icon={Inbox} label="Intake" />
+        <SidebarLink to="/business-memory" icon={Database} label="Business Memory" />
         <SidebarLink to="/agents" icon={Bot} label="Agents" />
       </NavSection>
 

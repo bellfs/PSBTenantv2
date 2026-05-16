@@ -6,6 +6,7 @@ import OSOverview from './pages/OSOverview';
 import Agents from './pages/Agents';
 import Intake from './pages/Intake';
 import EmailAgent from './pages/EmailAgent';
+import BusinessMemory from './pages/BusinessMemory';
 import Dashboard from './pages/Dashboard';
 import Issues from './pages/Issues';
 import IssueDetail from './pages/IssueDetail';
@@ -57,6 +58,7 @@ export default function App() {
             <Route path="agents" element={<Agents />} />
             <Route path="intake" element={<Intake />} />
             <Route path="email-agent" element={<EmailAgent />} />
+            <Route path="business-memory" element={<BusinessMemory />} />
             <Route path="issues" element={<Issues />} />
             <Route path="issues/:id" element={<IssueDetail />} />
             <Route path="timeline" element={<IssueTimeline />} />

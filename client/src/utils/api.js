@@ -148,6 +148,12 @@ export const api = {
   sendEmailDailyReport: (date) => request('/email-agent/reports/daily/send', { method: 'POST', body: JSON.stringify({ date }) }),
   getEmailAgentReports: (limit = 30) => request(`/email-agent/reports?limit=${limit}`),
 
+  // Business Memory
+  getBusinessMemorySummary: () => request('/business-memory/summary'),
+  snapshotBusinessMemory: () => request('/business-memory/snapshot', { method: 'POST' }),
+  getBusinessMemoryFiles: () => request('/business-memory/files'),
+  getBusinessMemoryFile: (path) => request(`/business-memory/file?path=${encodeURIComponent(path)}`),
+
   // Inspections (Check-In / Check-Out)
   getInspections: (params = {}) => { const qs = new URLSearchParams(params).toString(); return request(`/inspections?${qs}`); },
   getInspection: (id) => request(`/inspections/${id}`),
