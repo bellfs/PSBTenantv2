@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const { getDb } = require('../database');
 
 const GENERATED_DIRS = ['raw', 'wiki', 'agents'];
+const CURATED_MEMORY_ROOT = path.join(__dirname, '..', 'curated-memory');
 const DEFAULT_LIMITS = {
   recentRows: 500,
   recentShortRows: 200,
@@ -93,6 +94,42 @@ function writeFileIfMissing(root, relativePath, content, writtenFiles) {
   const target = path.join(root, safe);
   if (fs.existsSync(target)) return 0;
   return writeFile(root, safe, content, writtenFiles);
+}
+
+function titleFromMarkdown(content, fallbackPath) {
+  const match = String(content || '').match(/^#\s+(.+)$/m);
+  if (match) return match[1].trim();
+  return path.basename(fallbackPath, path.extname(fallbackPath))
+    .replace(/[-_]+/g, ' ')
+    .replace(/\b\w/g, char => char.toUpperCase());
+}
+
+function collectCuratedMemoryFiles() {
+  const files = [];
+  function walk(dir) {
+    if (!fs.existsSync(dir)) return;
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name === '.DS_Store') continue;
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(fullPath);
+        continue;
+      }
+      if (path.extname(entry.name).toLowerCase() !== '.md') continue;
+      const relativePath = path.relative(CURATED_MEMORY_ROOT, fullPath).replace(/\\/g, '/');
+      const content = fs.readFileSync(fullPath, 'utf8');
+      files.push({
+        id: relativePath.replace(/\.md$/i, ''),
+        relativePath,
+        targetPath: `wiki/curated/${relativePath}`,
+        title: titleFromMarkdown(content, relativePath),
+        content
+      });
+    }
+  }
+
+  walk(CURATED_MEMORY_ROOT);
+  return files.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
 }
 
 function safeAll(db, sql, params = []) {
@@ -670,6 +707,7 @@ The platform database and uploaded documents remain the source of truth. This fo
 
 - \`wiki/\` contains compiled operating knowledge by entity and lane.
 - \`wiki/context/\` contains Durham, property-facts, supplier and workmen/team context agents should read first.
+- \`wiki/curated/\` contains source-controlled business canon distilled from local ChatGPT, WhatsApp, Codex and operating documents.
 - \`wiki/calendar/\` contains connected calendar context and observed calendar event versions.
 - \`wiki/source-of-record/\` contains the append-only business event ledger.
 - \`raw/\` contains source manifests, source counts and recent communication snippets.
@@ -693,7 +731,7 @@ function buildAgentsReadme(generatedAt) {
 Use this filesystem as business context before acting inside FFR Property OS.
 
 1. Start with \`wiki/index.md\` and \`INDEX.json\`.
-2. Read \`wiki/context/property-operating-facts.md\`, \`wiki/context/durham-city.md\`, \`wiki/context/email-correspondence.md\`, \`wiki/context/energy-contracts-and-suppliers.md\` and \`wiki/context/workmen-team-contractors.md\` before property, supplier, contractor or correspondence work.
+2. Read \`wiki/curated/ffr-group/README.md\`, then \`wiki/context/property-operating-facts.md\`, \`wiki/context/durham-city.md\`, \`wiki/context/email-correspondence.md\`, \`wiki/context/energy-contracts-and-suppliers.md\` and \`wiki/context/workmen-team-contractors.md\` before property, supplier, contractor or correspondence work.
 3. Treat SQLite, connected inboxes, uploaded documents and \`wiki/source-of-record/business-event-ledger.md\` as canonical where there is a conflict.
 4. Cite source ids, file paths, task ids, issue ids and email message ids in any recommendation.
 5. Do not send messages, approve spend, alter rent/deposit positions or instruct contractors without a platform approval.
@@ -761,6 +799,13 @@ ${section('Open Issues', bulletList(openIssues.slice(0, 25), issue => `#${issue.
 ## Core Context Files
 
 ${table(indexEntries.filter(entry => entry.type === 'context'), [
+    { label: 'Context', value: 'title' },
+    { label: 'Path', value: 'path', max: 220 }
+  ])}
+
+## Curated Business Canon
+
+${table(indexEntries.filter(entry => entry.type === 'curated_context'), [
     { label: 'Context', value: 'title' },
     { label: 'Path', value: 'path', max: 220 }
   ])}
@@ -1980,6 +2025,7 @@ function snapshotBusinessMemory(options = {}) {
   try {
     cleanGeneratedDirs(root);
     const data = collectData();
+    const curatedFiles = collectCuratedMemoryFiles();
     const maps = {
       propertyPath: {},
       tenantPath: {},
@@ -2021,6 +2067,9 @@ function snapshotBusinessMemory(options = {}) {
       { type: 'calendar', id: 'calendar-source-of-record', title: 'Calendar Source of Record', path: 'wiki/calendar/source-of-record.md' },
       { type: 'source_of_record', id: 'business-event-ledger', title: 'Business Event Ledger', path: 'wiki/source-of-record/business-event-ledger.md' }
     );
+    for (const file of curatedFiles) {
+      indexEntries.push({ type: 'curated_context', id: file.id, title: file.title, path: file.targetPath });
+    }
 
     bytesWritten += writeFile(root, 'wiki/index.md', buildWikiIndex(data, generatedAt, indexEntries), writtenFiles);
     bytesWritten += writeFile(root, 'wiki/context/property-operating-facts.md', buildPropertyFactsPage(data, generatedAt), writtenFiles);
@@ -2031,6 +2080,9 @@ function snapshotBusinessMemory(options = {}) {
     bytesWritten += writeFile(root, 'wiki/context/workmen-team-contractors.md', buildWorkmenTeamPage(data, generatedAt), writtenFiles);
     bytesWritten += writeFile(root, 'wiki/calendar/source-of-record.md', buildCalendarPage(data, generatedAt), writtenFiles);
     bytesWritten += writeFile(root, 'wiki/source-of-record/business-event-ledger.md', buildBusinessLedgerPage(data, generatedAt), writtenFiles);
+    for (const file of curatedFiles) {
+      bytesWritten += writeFile(root, file.targetPath, file.content, writtenFiles);
+    }
 
     for (const property of data.properties) {
       bytesWritten += writeFile(root, maps.propertyPath[property.id], buildPropertyPage(property, data, maps, generatedAt), writtenFiles);

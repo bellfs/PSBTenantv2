@@ -102,6 +102,8 @@ FFR Property OS now has a Business Memory layer inspired by Andrej Karpathy's LL
 - Generated files are Markdown for humans and Codex agents, plus `INDEX.json` for machine lookup.
 - Compiled folders (`wiki/`, `raw/`, `agents/`, `daily/`) can be regenerated after imports and syncs.
 - `notes/` is preserved for human and Codex working notes.
+- Source-controlled curated canon lives in `server/curated-memory/ffr-group/` and is copied into `wiki/curated/ffr-group/` on every snapshot.
+- The curated canon includes distilled context from local ChatGPT/WhatsApp exports, Codex sessions, operating manuals, valuation material and finance model projects, with private raw chats and unnecessary personal data kept out of Git.
 - Generated memory is ignored by Git because it contains private business context.
 
 Useful commands:
