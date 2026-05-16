@@ -12,7 +12,9 @@ import {
   CheckCircle,
   ClipboardList,
   Database,
+  Gauge,
   Inbox,
+  ListChecks,
   MailCheck,
   RefreshCw,
   ShieldCheck,
@@ -142,6 +144,31 @@ export default function TeamHome() {
     }
   };
 
+  const runSuggestedAgent = async (suggestion) => {
+    if (!suggestion?.agent_key) return;
+    setWorking(`agent-${suggestion.agent_key}`);
+    setNotice('');
+    setError('');
+    try {
+      const response = await api.runAgent(suggestion.agent_key, {
+        mode: 'dry_run',
+        trigger_type: 'today_command_center',
+        input: { request: suggestion.request },
+        context: {
+          source: 'today_command_center',
+          suggested_title: suggestion.title,
+          generated_at: today?.date || new Date().toISOString()
+        }
+      });
+      setNotice(`${response.agent?.name || 'Agent'} prepared a dry-run plan.`);
+      await load();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setWorking('');
+    }
+  };
+
   const enableDesktopNotification = async () => {
     const bridge = desktopBridge();
     if (!bridge?.notify) return;
@@ -153,8 +180,14 @@ export default function TeamHome() {
   const calendarEvents = today?.calendar?.events || [];
   const topIssues = today?.open_issues || [];
   const tasks = today?.tasks || [];
+  const approvals = today?.approvals || [];
   const drafts = today?.email_drafts || [];
   const propertyPulse = today?.property_pulse || [];
+  const commandBrief = today?.command_brief || {};
+  const nextActions = today?.next_actions || [];
+  const laneHealth = today?.lane_health || [];
+  const agentSuggestions = today?.agent_suggestions || [];
+  const autonomy = today?.autonomy || {};
 
   const name = useMemo(() => user?.name?.split(' ')[0] || 'team', [user]);
 
@@ -220,6 +253,58 @@ export default function TeamHome() {
         />
       </div>
 
+      <section className="team-command-card">
+        <div className="team-command-main">
+          <div className="team-command-kicker"><Sparkles size={14} /> Command Brief</div>
+          <h3>{commandBrief.headline || 'Today is ready.'}</h3>
+          <div className="team-command-summary">
+            {(commandBrief.summary || []).map((line) => <span key={line}>{line}</span>)}
+          </div>
+          <div className="team-command-principle">{commandBrief.principle || 'Decide once, record it, reuse it.'}</div>
+        </div>
+        <div className="team-autonomy-meter">
+          <div className="team-autonomy-score">
+            <Gauge size={18} />
+            <strong>{autonomy.score ?? 0}</strong>
+          </div>
+          <span className={`badge ${autonomy.status === 'strong' ? 'badge-low' : autonomy.status === 'risk' ? 'badge-urgent' : 'badge-medium'}`}>
+            {autonomy.status || 'watch'}
+          </span>
+          <small>{autonomy.explanation || 'Autonomy improves as more source systems are connected.'}</small>
+        </div>
+      </section>
+
+      <section className="team-next-actions">
+        {nextActions.map((action, index) => (
+          <div className="team-next-action" key={`${action.title}-${index}`}>
+            <div className="team-next-index">{index + 1}</div>
+            <div>
+              <strong>{action.title}</strong>
+              <small>{action.detail}</small>
+            </div>
+            {action.agent_key ? (
+              <button
+                className="btn btn-secondary btn-sm"
+                disabled={working === `agent-${action.agent_key}`}
+                onClick={() => runSuggestedAgent({ agent_key: action.agent_key, title: action.action, request: action.prompt })}
+              >
+                <Bot size={13} /> {working === `agent-${action.agent_key}` ? 'Preparing' : action.action}
+              </button>
+            ) : action.title.toLowerCase().includes('calendar') ? (
+              <button className="btn btn-secondary btn-sm" disabled={working === 'calendar'} onClick={connectCalendar}>
+                <CalendarDays size={13} /> Connect
+              </button>
+            ) : action.title.toLowerCase().includes('memory') ? (
+              <button className="btn btn-secondary btn-sm" disabled={working === 'memory'} onClick={() => runAction('memory', api.snapshotBusinessMemory, 'Business Memory snapshot generated.')}>
+                <Database size={13} /> Refresh
+              </button>
+            ) : (
+              <Link className="btn btn-secondary btn-sm" to={action.href}>Open <ArrowUpRight size={12} /></Link>
+            )}
+          </div>
+        ))}
+      </section>
+
       <div className="team-action-bar">
         <button className="btn btn-primary" disabled={working === 'email'} onClick={() => runAction('email', api.runEmailAgent, 'Email agent refreshed.')}>
           <MailCheck size={15} /> {working === 'email' ? 'Refreshing' : 'Run email agent'}
@@ -230,6 +315,26 @@ export default function TeamHome() {
         </button>
         <Link className="btn btn-secondary" to="/agents"><Sparkles size={15} /> Agent tasks</Link>
       </div>
+
+      <section className="card">
+        <div className="card-header">
+          <h3>Operating Lanes</h3>
+          <Link to="/os" className="btn btn-ghost btn-sm">Review <ArrowUpRight size={12} /></Link>
+        </div>
+        <div className="card-body team-lanes">
+          {laneHealth.map(lane => (
+            <Link to={lane.href} className={`team-lane ${lane.tone}`} key={lane.name}>
+              <div className="team-lane-top">
+                <strong>{lane.name}</strong>
+                <span>{lane.score}</span>
+              </div>
+              <div className="team-lane-bar"><i style={{ width: `${lane.score}%` }} /></div>
+              <small>{lane.owner} · {lane.status}</small>
+              <p>{(lane.signals || []).join(' · ')}</p>
+            </Link>
+          ))}
+        </div>
+      </section>
 
       <div className="team-grid-main">
         <section className="card">
@@ -246,6 +351,25 @@ export default function TeamHome() {
                   <small>{item.detail}</small>
                 </span>
                 <ArrowUpRight size={14} />
+              </Link>
+            ))}
+          </div>
+        </section>
+
+        <section className="card">
+          <div className="card-header">
+            <h3>Decision Queue</h3>
+            <Link to="/agents" className="btn btn-ghost btn-sm">Open <ArrowUpRight size={12} /></Link>
+          </div>
+          <div className="card-body team-list">
+            {approvals.length === 0 ? <EmptyLine>No approvals waiting.</EmptyLine> : approvals.map(approval => (
+              <Link to="/agents" key={approval.id} className={`team-row ${approval.risk_level || 'neutral'}`}>
+                <ListChecks size={15} />
+                <span>
+                  <strong>{approval.title}</strong>
+                  <small>{approval.summary || approval.task_title || approval.agent_name || approval.action_type}</small>
+                </span>
+                <span className={`badge ${approval.risk_level === 'high' ? 'badge-urgent' : approval.risk_level === 'low' ? 'badge-low' : 'badge-medium'}`}>{approval.risk_level || 'medium'}</span>
               </Link>
             ))}
           </div>
@@ -315,6 +439,30 @@ export default function TeamHome() {
       </div>
 
       <div className="team-grid-secondary">
+        <section className="card">
+          <div className="card-header">
+            <h3>Suggested Agent Runs</h3>
+            <Link to="/agents" className="btn btn-ghost btn-sm">Agents <ArrowUpRight size={12} /></Link>
+          </div>
+          <div className="card-body team-list compact">
+            {agentSuggestions.length === 0 ? <EmptyLine>No suggested agent runs.</EmptyLine> : agentSuggestions.map(suggestion => (
+              <button
+                key={`${suggestion.agent_key}-${suggestion.title}`}
+                className="team-row neutral team-row-button"
+                disabled={working === `agent-${suggestion.agent_key}`}
+                onClick={() => runSuggestedAgent(suggestion)}
+              >
+                <Bot size={15} />
+                <span>
+                  <strong>{suggestion.title}</strong>
+                  <small>{suggestion.why}</small>
+                </span>
+                <ArrowUpRight size={14} />
+              </button>
+            ))}
+          </div>
+        </section>
+
         <section className="card">
           <div className="card-header">
             <h3>Tasks</h3>

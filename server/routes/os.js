@@ -21,6 +21,303 @@ function rows(db, sql, params = []) {
   try { return db.prepare(sql).all(...params); } catch { return []; }
 }
 
+function clamp(value, min = 0, max = 100) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function laneStatus(score) {
+  if (score >= 80) return 'strong';
+  if (score >= 55) return 'watch';
+  return 'risk';
+}
+
+function laneTone(score) {
+  if (score >= 80) return 'success';
+  if (score >= 55) return 'warning';
+  return 'danger';
+}
+
+function buildLane({ name, score, owner, agent_key, signals, href }) {
+  const safeScore = clamp(score);
+  return {
+    name,
+    score: safeScore,
+    status: laneStatus(safeScore),
+    tone: laneTone(safeScore),
+    owner,
+    agent_key,
+    href,
+    signals: signals.filter(Boolean).slice(0, 3)
+  };
+}
+
+function buildLaneHealth({ issueCounts, taskCounts, emailCounts, approvalCounts, complianceCounts, intakeCounts, calendarConnected, memoryFresh, financeUncategorised }) {
+  return [
+    buildLane({
+      name: 'Inbox & Admin',
+      score: 100 - (emailCounts.needs_reply * 7) - (emailCounts.draft_replies * 4) - (emailCounts.needs_followup * 5),
+      owner: 'Hannah',
+      agent_key: 'admin_email_agent',
+      href: '/email-agent',
+      signals: [
+        `${emailCounts.needs_reply} emails need reply`,
+        `${emailCounts.draft_replies} drafts waiting`,
+        emailCounts.needs_followup ? `${emailCounts.needs_followup} team follow-ups` : 'No team follow-ups flagged'
+      ]
+    }),
+    buildLane({
+      name: 'Maintenance & Turnaround',
+      score: 100 - (issueCounts.urgent * 16) - (issueCounts.escalated * 18) - Math.min(issueCounts.open, 20) * 2 - (taskCounts.due_today * 5),
+      owner: 'Andy / Akiel',
+      agent_key: issueCounts.urgent || issueCounts.escalated ? 'maintenance_triage' : 'turnaround_orchestrator',
+      href: '/issues',
+      signals: [
+        `${issueCounts.open} open issues`,
+        `${issueCounts.urgent} urgent`,
+        `${taskCounts.due_today} tasks due today`
+      ]
+    }),
+    buildLane({
+      name: 'Compliance & Legal Risk',
+      score: 100 - (complianceCounts.expired * 22) - (complianceCounts.expiring_soon * 7) - (approvalCounts.high_risk * 8),
+      owner: 'Fergus / Hannah',
+      agent_key: 'compliance_guardian',
+      href: '/compliance',
+      signals: [
+        `${complianceCounts.expired} expired items`,
+        `${complianceCounts.expiring_soon} expiring soon`,
+        approvalCounts.high_risk ? `${approvalCounts.high_risk} high-risk approvals` : 'No high-risk approvals'
+      ]
+    }),
+    buildLane({
+      name: 'Lettings & Revenue',
+      score: 86 - (intakeCounts.extracted_tasks * 2) - (taskCounts.due_soon * 2),
+      owner: 'Hannah / Fergus',
+      agent_key: 'leasing_revenue',
+      href: '/agents',
+      signals: [
+        `${intakeCounts.extracted_tasks} extracted intake tasks`,
+        `${taskCounts.due_soon} tasks due this week`,
+        'Protect 52OE pricing and short-let calendar discipline'
+      ]
+    }),
+    buildLane({
+      name: 'Finance & Suppliers',
+      score: 88 - Math.min(financeUncategorised, 30) - (approvalCounts.pending * 2),
+      owner: 'Fergus / Hannah',
+      agent_key: financeUncategorised ? 'finance_reconciler' : 'utilities_procurement',
+      href: '/finance',
+      signals: [
+        `${financeUncategorised} uncategorised transactions`,
+        `${approvalCounts.pending} approvals pending`,
+        'Keep supplier evidence and meter readings source-linked'
+      ]
+    }),
+    buildLane({
+      name: 'Memory & Calendar',
+      score: 55 + (calendarConnected ? 20 : 0) + (memoryFresh ? 25 : 0),
+      owner: 'System',
+      agent_key: 'ops_copilot',
+      href: '/business-memory',
+      signals: [
+        calendarConnected ? 'Calendar connected' : 'Calendar not connected',
+        memoryFresh ? 'Business Memory refreshed today' : 'Business Memory needs refresh',
+        'Ledger is the future source of record'
+      ]
+    })
+  ];
+}
+
+function buildNextActions({ issueCounts, taskCounts, emailCounts, approvalCounts, complianceCounts, intakeCounts, calendarConnected, memoryFresh }) {
+  const actions = [];
+  if (emailCounts.needs_reply || emailCounts.draft_replies) {
+    actions.push({
+      title: 'Clear email replies before new work starts',
+      detail: `${emailCounts.needs_reply} need reply and ${emailCounts.draft_replies} drafts are waiting.`,
+      href: '/email-agent',
+      action: 'Run email agent',
+      agent_key: 'admin_email_agent',
+      prompt: 'Review today\'s connected inbox context, identify emails needing replies, draft any missing replies, and produce a short admin action list with owners.'
+    });
+  }
+  if (approvalCounts.pending) {
+    actions.push({
+      title: 'Review approval queue',
+      detail: `${approvalCounts.pending} decisions are waiting; ${approvalCounts.high_risk} are high risk.`,
+      href: '/agents',
+      action: 'Open approvals',
+      agent_key: 'ops_copilot',
+      prompt: 'Review pending approvals, group them by risk, and recommend the safest review order with source evidence required for each.'
+    });
+  }
+  if (issueCounts.urgent || issueCounts.escalated) {
+    actions.push({
+      title: 'Triage urgent maintenance',
+      detail: `${issueCounts.urgent} urgent and ${issueCounts.escalated} escalated issues need same-day handling.`,
+      href: '/issues',
+      action: 'Run triage',
+      agent_key: 'maintenance_triage',
+      prompt: 'Review urgent and escalated maintenance issues, identify safety risks, missing information, owner, next action, and approval requirements.'
+    });
+  }
+  if (complianceCounts.expired || complianceCounts.expiring_soon) {
+    actions.push({
+      title: 'Protect compliance position',
+      detail: `${complianceCounts.expired} expired and ${complianceCounts.expiring_soon} expiring items are visible.`,
+      href: '/compliance',
+      action: 'Run guardian',
+      agent_key: 'compliance_guardian',
+      prompt: 'Review compliance items due or expired, rank by property risk, and draft the evidence checklist needed to close gaps.'
+    });
+  }
+  if (taskCounts.due_today) {
+    actions.push({
+      title: 'Close today\'s task commitments',
+      detail: `${taskCounts.due_today} open tasks are due today.`,
+      href: '/agents',
+      action: 'Plan day',
+      agent_key: 'ops_copilot',
+      prompt: 'Turn today\'s due tasks into a clear operating plan with owner, deadline, source, and decision needed.'
+    });
+  }
+  if (intakeCounts.extracted_tasks) {
+    actions.push({
+      title: 'Convert intake into accountable work',
+      detail: `${intakeCounts.extracted_tasks} WhatsApp/email intake tasks have been extracted.`,
+      href: '/intake',
+      action: 'Review intake',
+      agent_key: 'turnaround_orchestrator',
+      prompt: 'Review recent intake extractions and consolidate duplicate or unclear jobs into a prioritised task list with property, owner, due date and approval risks.'
+    });
+  }
+  if (!calendarConnected) {
+    actions.push({
+      title: 'Connect shared calendar',
+      detail: 'Calendar is not yet connected, so viewings, cleans and short-let commitments are not fully visible.',
+      href: '/',
+      action: 'Connect calendar',
+      agent_key: null
+    });
+  }
+  if (!memoryFresh) {
+    actions.push({
+      title: 'Refresh Business Memory',
+      detail: 'Run a snapshot so agents read the latest database, calendar, email and curated FFR context.',
+      href: '/business-memory',
+      action: 'Refresh memory',
+      agent_key: null
+    });
+  }
+  if (!actions.length) {
+    actions.push({
+      title: 'Run a daily ops sweep',
+      detail: 'No critical blockers are visible. Use the spare capacity to find weak signals before they become problems.',
+      href: '/agents',
+      action: 'Run sweep',
+      agent_key: 'ops_copilot',
+      prompt: 'Run a daily FFR Property OS sweep across memory, issues, email, calendar, tasks and approvals. Identify weak signals, missing data and the next three useful actions.'
+    });
+  }
+  return actions.slice(0, 5);
+}
+
+function buildAgentSuggestions(nextActions) {
+  return nextActions
+    .filter(action => action.agent_key)
+    .slice(0, 3)
+    .map(action => ({
+      agent_key: action.agent_key,
+      title: action.action,
+      request: action.prompt,
+      why: action.detail,
+      source: 'today_command_center'
+    }));
+}
+
+function buildCommandBrief({ issueCounts, taskCounts, emailCounts, approvalCounts, complianceCounts, calendarConnected, memoryFresh }) {
+  const blockers = [];
+  if (issueCounts.urgent || issueCounts.escalated) blockers.push('urgent maintenance');
+  if (approvalCounts.pending) blockers.push('pending approvals');
+  if (emailCounts.needs_reply || emailCounts.draft_replies) blockers.push('email replies');
+  if (complianceCounts.expired) blockers.push('expired compliance');
+
+  const headline = blockers.length
+    ? `Start with ${blockers.slice(0, 2).join(' and ')}.`
+    : 'No critical blockers visible. Use today to tighten the system.';
+
+  const summary = [
+    `${issueCounts.open} open issues, ${taskCounts.open} open agent tasks and ${approvalCounts.pending} pending approvals are visible.`,
+    `${emailCounts.needs_reply} emails need reply and ${emailCounts.draft_replies} draft replies are waiting.`,
+    calendarConnected ? 'Calendar context is connected.' : 'Calendar context is not connected yet.',
+    memoryFresh ? 'Business Memory has been refreshed today.' : 'Business Memory has not been refreshed today.'
+  ];
+
+  return {
+    headline,
+    summary,
+    operating_mode: approvalCounts.high_risk || issueCounts.urgent || complianceCounts.expired ? 'Human-in-the-loop' : 'Copilot',
+    principle: 'Decide once, record it, and let agents reuse the context next time.'
+  };
+}
+
+function buildAutonomyStatus({ emailAccounts, calendarConnected, memoryFresh, ledgerEvents, approvalCounts }) {
+  const score = clamp(
+    35 +
+    (emailAccounts ? 15 : 0) +
+    (calendarConnected ? 15 : 0) +
+    (memoryFresh ? 15 : 0) +
+    (ledgerEvents ? 10 : 0) -
+    Math.min(approvalCounts.pending * 2, 20)
+  );
+
+  return {
+    score,
+    status: laneStatus(score),
+    mode: process.env.CODEX_AGENT_MODE === 'execute' ? 'execute' : 'dry_run',
+    explanation: score >= 80
+      ? 'The platform has enough connected context to let agents take more first drafts and monitoring work.'
+      : score >= 55
+      ? 'The control plane is usable, but more calendar/email/memory coverage will improve autonomy.'
+      : 'The platform needs more connected source systems before agents can safely reduce human load.',
+    gaps: [
+      emailAccounts ? null : 'Connect the core team inboxes.',
+      calendarConnected ? null : 'Connect shared Google Calendar.',
+      memoryFresh ? null : 'Refresh Business Memory today.',
+      ledgerEvents ? null : 'Generate more source-of-record ledger events.'
+    ].filter(Boolean)
+  };
+}
+
+function buildSeniorReview({ modules, taskSummary, codexVersion }) {
+  return {
+    verdict: 'The platform has the right foundations. The next leap is not more pages; it is a tighter operating loop that turns every email, WhatsApp, calendar event and document into decisions, tasks, approvals and memory.',
+    simplifications: [
+      'Make Today the default cockpit for the team, not a passive dashboard.',
+      'Keep specialist modules, but hide them behind operating lanes and next actions.',
+      'Move from raw inbox/chat lists to decisions, owners, dates and evidence.',
+      'Use Business Memory as the agent-readable company wiki rather than scattering context across prompts.'
+    ],
+    feature_priorities: [
+      { horizon: 'Now', title: 'Command center', detail: 'Daily brief, lane health, decision queue and suggested agent runs on the first screen.' },
+      { horizon: 'Now', title: 'Approval discipline', detail: 'External messages, pricing, spend, legal, access and supplier changes stay human-approved.' },
+      { horizon: 'Next', title: 'Leasing pipeline', detail: 'Lead, viewing, offer, contract, deposit and renewal state should become a first-class data model.' },
+      { horizon: 'Next', title: 'Short-let control room', detail: 'Calendar, OTA listing, cleaner, linen, access and revenue targets need one operating lane.' },
+      { horizon: 'Later', title: 'Autonomous playbooks', detail: 'Only promote workflows from draft to execute after they have repeated, logged success.' }
+    ],
+    operating_principles: [
+      'Every action has an owner, source, deadline and approval state.',
+      'Agents draft and monitor by default; humans approve commitments.',
+      'The database and ledger are the source of record; curated memory is the shared operating brain.',
+      'The team sees fewer screens, while agents see more context.'
+    ],
+    current_constraints: [
+      codexVersion ? null : 'Codex live execution is not available in this server process; agent runs will remain dry-run/prompt-prep until configured.',
+      taskSummary.pending_approvals ? `${taskSummary.pending_approvals} approvals need human review before autonomy can increase.` : null,
+      modules.find(module => module.key === 'finance')?.status === 'partial' ? 'Finance is still partial; bank/Pleo/QuickBooks coverage should be expanded before autonomous finance workflows.' : null
+    ].filter(Boolean)
+  };
+}
+
 router.get('/overview', async (req, res) => {
   const db = getDb();
   try {
@@ -139,6 +436,7 @@ router.get('/overview', async (req, res) => {
       },
       modules,
       risk_signals: riskSignals,
+      senior_review: buildSeniorReview({ modules, taskSummary, codexVersion }),
       task_summary: taskSummary,
       lanes,
       recent_events: recentEvents
@@ -275,6 +573,62 @@ router.get('/today', (req, res) => {
       LIMIT 8
     `);
 
+    const emailAccountCount = scalar(db, 'SELECT COUNT(*) FROM email_accounts WHERE sync_enabled = 1');
+    const memoryFresh = !!scalar(db, "SELECT COUNT(*) FROM business_memory_snapshots WHERE status = 'completed' AND DATE(created_at) = DATE('now')");
+    const latestMemorySnapshot = rows(db, `
+      SELECT id, root_path, file_count, bytes_written, status, created_by, created_at
+      FROM business_memory_snapshots
+      ORDER BY created_at DESC
+      LIMIT 1
+    `)[0] || null;
+    const ledgerEventsToday = scalar(db, "SELECT COUNT(*) FROM business_event_ledger WHERE DATE(created_at) = DATE('now')");
+    const ledgerEventsTotal = scalar(db, 'SELECT COUNT(*) FROM business_event_ledger');
+    const financeUncategorised = scalar(db, `
+      SELECT COUNT(*)
+      FROM bank_transactions
+      WHERE COALESCE(ai_category, category, '') = ''
+         OR LOWER(COALESCE(ai_category, category, '')) LIKE '%uncategor%'
+         OR LOWER(COALESCE(ai_category, category, '')) LIKE '%other%'
+    `);
+    const calendarConnected = calendarAccounts.some(account => account.sync_enabled);
+    const laneHealth = buildLaneHealth({
+      issueCounts,
+      taskCounts,
+      emailCounts,
+      approvalCounts,
+      complianceCounts,
+      intakeCounts,
+      calendarConnected,
+      memoryFresh,
+      financeUncategorised
+    });
+    const nextActions = buildNextActions({
+      issueCounts,
+      taskCounts,
+      emailCounts,
+      approvalCounts,
+      complianceCounts,
+      intakeCounts,
+      calendarConnected,
+      memoryFresh
+    });
+    const commandBrief = buildCommandBrief({
+      issueCounts,
+      taskCounts,
+      emailCounts,
+      approvalCounts,
+      complianceCounts,
+      calendarConnected,
+      memoryFresh
+    });
+    const autonomy = buildAutonomyStatus({
+      emailAccounts: emailAccountCount,
+      calendarConnected,
+      memoryFresh,
+      ledgerEvents: ledgerEventsTotal,
+      approvalCounts
+    });
+
     const focus = [];
     if (issueCounts.urgent || issueCounts.escalated) {
       focus.push({
@@ -329,6 +683,11 @@ router.get('/today', (req, res) => {
         intake: intakeCounts
       },
       focus,
+      command_brief: commandBrief,
+      next_actions: nextActions,
+      lane_health: laneHealth,
+      agent_suggestions: buildAgentSuggestions(nextActions),
+      autonomy,
       open_issues: openIssues,
       tasks,
       approvals,
@@ -336,9 +695,15 @@ router.get('/today', (req, res) => {
       intake,
       compliance,
       calendar: {
-        connected: calendarAccounts.some(account => account.sync_enabled),
+        connected: calendarConnected,
         accounts: calendarAccounts,
         events: calendarEvents
+      },
+      memory: {
+        fresh_today: memoryFresh,
+        latest_snapshot: latestMemorySnapshot,
+        ledger_events_today: ledgerEventsToday,
+        ledger_events_total: ledgerEventsTotal
       },
       property_pulse: propertyPulse,
       desktop_notifications: {

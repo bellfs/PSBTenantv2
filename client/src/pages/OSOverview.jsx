@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../utils/api';
-import { Activity, AlertTriangle, ArrowUpRight, Bot, Building2, CheckCircle, CircleDashed, ShieldCheck, Workflow, Zap } from 'lucide-react';
+import { Activity, AlertTriangle, ArrowUpRight, Bot, Building2, CheckCircle, CircleDashed, Layers3, Lightbulb, ShieldCheck, Workflow, Zap } from 'lucide-react';
 
 const statusTone = {
   live: { color: 'var(--success)', label: 'Live' },
@@ -58,6 +58,72 @@ export default function OSOverview() {
           <div className="stat-card-sub">pending human review</div>
         </div>
       </div>
+
+      {data.senior_review && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <div className="card-header" style={{ alignItems: 'flex-start', gap: 12 }}>
+            <div>
+              <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Lightbulb size={15} /> Senior Product Review</h3>
+              <p style={{ color: 'var(--text-secondary)', fontSize: 12, marginTop: 5, lineHeight: 1.5 }}>{data.senior_review.verdict}</p>
+            </div>
+          </div>
+          <div className="card-body" style={{ display: 'grid', gap: 16 }}>
+            <div className="chart-grid-2" style={{ marginBottom: 0 }}>
+              <div>
+                <div className="stat-card-label" style={{ marginBottom: 8 }}>Simplifications</div>
+                <div style={{ display: 'grid', gap: 8 }}>
+                  {data.senior_review.simplifications.map(item => (
+                    <div key={item} className="team-row neutral" style={{ minHeight: 44 }}>
+                      <Layers3 size={14} />
+                      <span><strong>{item}</strong></span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <div className="stat-card-label" style={{ marginBottom: 8 }}>Operating Principles</div>
+                <div style={{ display: 'grid', gap: 8 }}>
+                  {data.senior_review.operating_principles.map(item => (
+                    <div key={item} className="team-row neutral" style={{ minHeight: 44 }}>
+                      <ShieldCheck size={14} />
+                      <span><strong>{item}</strong></span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <div className="stat-card-label" style={{ marginBottom: 8 }}>Build Roadmap</div>
+              <div className="team-lanes">
+                {data.senior_review.feature_priorities.map(item => (
+                  <div key={`${item.horizon}-${item.title}`} className="team-lane">
+                    <div className="team-lane-top">
+                      <strong>{item.title}</strong>
+                      <span style={{ fontSize: 11 }}>{item.horizon}</span>
+                    </div>
+                    <p>{item.detail}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {data.senior_review.current_constraints.length > 0 && (
+              <div>
+                <div className="stat-card-label" style={{ marginBottom: 8 }}>Constraints</div>
+                <div style={{ display: 'grid', gap: 8 }}>
+                  {data.senior_review.current_constraints.map(item => (
+                    <div key={item} className="team-row warning" style={{ minHeight: 44 }}>
+                      <AlertTriangle size={14} />
+                      <span><strong>{item}</strong></span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="chart-grid-2">
         <div className="card">
