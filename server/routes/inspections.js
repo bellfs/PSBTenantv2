@@ -1,6 +1,7 @@
 const express = require('express');
 const { getDb } = require('../database');
 const { authenticate } = require('../middleware/auth');
+const { actorFromUser, recordBusinessEvent, recordEntityChange } = require('../services/business-ledger');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
@@ -134,6 +135,18 @@ router.post('/', authenticate, (req, res) => {
     `).run(type, property_id, flat_number || null, tenant_id || null, tenancy_id || null, req.user.name, inspection_date, notes || null, deposit_amount || null, linked_checkin_id || null);
 
     const inspectionId = result.lastInsertRowid;
+    recordBusinessEvent(db, {
+      event_type: 'inspection_created',
+      domain: 'turnaround',
+      importance: 'high',
+      source_table: 'inspections',
+      source_id: inspectionId,
+      property_id,
+      tenant_id: tenant_id || null,
+      actor: actorFromUser(req.user),
+      summary: `${type} inspection created for property #${property_id}${flat_number ? ` (${flat_number})` : ''}`,
+      payload: { type, property_id, flat_number, tenant_id, tenancy_id, inspection_date, deposit_amount, linked_checkin_id }
+    });
 
     // Create rooms with default items
     const roomList = rooms || DEFAULT_ROOMS;
@@ -195,6 +208,42 @@ router.put('/:id', authenticate, (req, res) => {
         updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `).run(status || null, notes || null, meter_gas || null, meter_electric || null, meter_water || null, key_count || null, key_notes || null, deposit_amount || null, tenant_id || null, flat_number || null, deposit_scheme || null, deposit_ref || null, cleaning_standard || null, req.params.id);
+    const updated = db.prepare('SELECT * FROM inspections WHERE id = ?').get(req.params.id);
+    recordEntityChange(db, {
+      eventType: 'inspection_updated',
+      domain: 'turnaround',
+      importance: (key_count !== undefined || key_notes !== undefined || status) ? 'high' : 'normal',
+      entityType: 'inspections',
+      sourceTable: 'inspections',
+      entityId: req.params.id,
+      property_id: updated?.property_id || inspection.property_id,
+      tenant_id: updated?.tenant_id || inspection.tenant_id || null,
+      actor: actorFromUser(req.user),
+      before: inspection,
+      after: updated,
+      keys: ['status', 'notes', 'meter_gas', 'meter_electric', 'meter_water', 'key_count', 'key_notes', 'deposit_amount', 'tenant_id', 'flat_number', 'deposit_scheme', 'deposit_ref', 'cleaning_standard'],
+      summary: `Inspection updated: #${req.params.id}${key_count !== undefined || key_notes !== undefined ? ' (key/access details changed)' : ''}`
+    });
+    if (key_count !== undefined || key_notes !== undefined) {
+      recordBusinessEvent(db, {
+        event_type: 'key_access_updated',
+        domain: 'turnaround',
+        importance: 'high',
+        source_table: 'inspections',
+        source_id: req.params.id,
+        property_id: updated?.property_id || inspection.property_id,
+        tenant_id: updated?.tenant_id || inspection.tenant_id || null,
+        actor: actorFromUser(req.user),
+        summary: `Key/access updated for inspection #${req.params.id}`,
+        payload: {
+          key_count_before: inspection.key_count,
+          key_count_after: updated?.key_count,
+          key_notes_before: inspection.key_notes,
+          key_notes_after: updated?.key_notes,
+          flat_number: updated?.flat_number || inspection.flat_number
+        }
+      });
+    }
 
     // Recalculate deposit return if deposit_amount changed
     if (deposit_amount !== undefined) {
@@ -650,6 +699,18 @@ router.delete('/:id', authenticate, (req, res) => {
     }
     db.prepare('DELETE FROM inspection_rooms WHERE inspection_id = ?').run(req.params.id);
     db.prepare('DELETE FROM inspections WHERE id = ?').run(req.params.id);
+    recordBusinessEvent(db, {
+      event_type: 'inspection_deleted',
+      domain: 'turnaround',
+      importance: 'high',
+      source_table: 'inspections',
+      source_id: inspection.id,
+      property_id: inspection.property_id,
+      tenant_id: inspection.tenant_id || null,
+      actor: actorFromUser(req.user),
+      summary: `Inspection deleted: #${inspection.id}`,
+      payload: { inspection }
+    });
 
     res.json({ success: true });
   } finally { db.close(); }

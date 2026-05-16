@@ -2,6 +2,7 @@ const express = require('express');
 const { getDb } = require('../database');
 const { authenticate } = require('../middleware/auth');
 const { sendStaffResponse, sendStatusUpdate } = require('../services/whatsapp');
+const { actorFromUser, recordBusinessEvent, recordEntityChange } = require('../services/business-ledger');
 
 const router = express.Router();
 
@@ -127,7 +128,7 @@ router.put('/:id', authenticate, async (req, res) => {
   const db = getDb();
   try {
     // Get old status for comparison
-    const oldIssue = db.prepare('SELECT status FROM issues WHERE id = ?').get(req.params.id);
+    const oldIssue = db.prepare('SELECT * FROM issues WHERE id = ?').get(req.params.id);
     const oldStatus = oldIssue?.status;
 
     const updates = [], params = [];
@@ -144,7 +145,24 @@ router.put('/:id', authenticate, async (req, res) => {
     updates.push('updated_at = CURRENT_TIMESTAMP');
     params.push(req.params.id);
     db.prepare(`UPDATE issues SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+    const newIssue = db.prepare('SELECT * FROM issues WHERE id = ?').get(req.params.id);
     db.prepare('INSERT INTO activity_log (issue_id, action, details, performed_by) VALUES (?, ?, ?, ?)').run(req.params.id, 'updated', JSON.stringify(req.body), req.user.name);
+    recordEntityChange(db, {
+      eventType: 'issue_updated',
+      domain: 'maintenance',
+      importance: status && status !== oldStatus ? 'high' : 'normal',
+      entityType: 'issues',
+      sourceTable: 'issues',
+      entityId: req.params.id,
+      issue_id: req.params.id,
+      property_id: newIssue?.property_id || oldIssue?.property_id || null,
+      tenant_id: newIssue?.tenant_id || oldIssue?.tenant_id || null,
+      actor: actorFromUser(req.user),
+      before: oldIssue,
+      after: newIssue,
+      keys: ['status', 'priority', 'category', 'title', 'final_cost', 'final_notes', 'attended_by', 'resolution_notes', 'resolved_at'],
+      summary: `Issue updated: ${newIssue?.uuid || req.params.id} ${newIssue?.title || ''}`.trim()
+    });
     res.json({ success: true });
 
     // Auto WhatsApp status update (async, non-blocking)
@@ -171,6 +189,17 @@ router.delete('/:id', authenticate, (req, res) => {
 
     // Delete the issue itself
     db.prepare('DELETE FROM issues WHERE id = ?').run(req.params.id);
+    recordBusinessEvent(db, {
+      event_type: 'issue_deleted',
+      domain: 'maintenance',
+      importance: 'high',
+      source_table: 'issues',
+      source_id: issue.id,
+      issue_id: null,
+      actor: actorFromUser(req.user),
+      summary: `Issue deleted: ${issue.uuid}`,
+      payload: { deleted_issue: issue }
+    });
     console.log(`[Issues] Deleted issue ${issue.uuid} (id:${issue.id}) by ${req.user.name}`);
     res.json({ success: true, uuid: issue.uuid });
   } finally { db.close(); }

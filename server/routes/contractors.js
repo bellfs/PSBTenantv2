@@ -2,6 +2,7 @@ const express = require('express');
 const { getDb } = require('../database');
 const { authenticate, requireAdmin } = require('../middleware/auth');
 const { callLLM } = require('../services/llm');
+const { actorFromUser, recordBusinessEvent, recordEntityChange } = require('../services/business-ledger');
 
 const router = express.Router();
 
@@ -27,6 +28,16 @@ router.post('/', authenticate, requireAdmin, (req, res) => {
   const db = getDb();
   try {
     const result = db.prepare('INSERT INTO contractors (name, trade, phone, email, notes) VALUES (?, ?, ?, ?, ?)').run(name, trade, phone || null, email || null, notes || null);
+    recordBusinessEvent(db, {
+      event_type: 'contractor_created',
+      domain: 'contractors',
+      importance: 'high',
+      source_table: 'contractors',
+      source_id: result.lastInsertRowid,
+      actor: actorFromUser(req.user),
+      summary: `Contractor created: ${name}`,
+      payload: { name, trade, phone, email, notes }
+    });
     res.json({ success: true, id: result.lastInsertRowid });
   } finally { db.close(); }
 });
@@ -36,6 +47,7 @@ router.put('/:id', authenticate, requireAdmin, (req, res) => {
   const { name, trade, phone, email, notes, active } = req.body;
   const db = getDb();
   try {
+    const before = db.prepare('SELECT * FROM contractors WHERE id = ?').get(req.params.id);
     const updates = [], params = [];
     if (name !== undefined) { updates.push('name = ?'); params.push(name); }
     if (trade !== undefined) { updates.push('trade = ?'); params.push(trade); }
@@ -46,6 +58,20 @@ router.put('/:id', authenticate, requireAdmin, (req, res) => {
     if (updates.length === 0) return res.json({ success: true });
     params.push(req.params.id);
     db.prepare(`UPDATE contractors SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+    const after = db.prepare('SELECT * FROM contractors WHERE id = ?').get(req.params.id);
+    recordEntityChange(db, {
+      eventType: 'contractor_updated',
+      domain: 'contractors',
+      importance: 'high',
+      entityType: 'contractors',
+      sourceTable: 'contractors',
+      entityId: req.params.id,
+      actor: actorFromUser(req.user),
+      before,
+      after,
+      keys: ['name', 'trade', 'phone', 'email', 'notes', 'active'],
+      summary: `Contractor updated: ${after?.name || before?.name || req.params.id}`
+    });
     res.json({ success: true });
   } finally { db.close(); }
 });
@@ -90,9 +116,23 @@ router.post('/issues/:id/quotes', authenticate, (req, res) => {
     const result = db.prepare('INSERT INTO quotes (issue_id, contractor_id, description, status) VALUES (?, ?, ?, ?)').run(
       req.params.id, contractor_id, description || null, 'requested'
     );
+    const issue = db.prepare('SELECT id, uuid, property_id, tenant_id FROM issues WHERE id = ?').get(req.params.id);
     db.prepare('INSERT INTO activity_log (issue_id, action, details, performed_by) VALUES (?, ?, ?, ?)').run(
       req.params.id, 'quote_requested', `Quote requested from contractor #${contractor_id}`, req.user.name
     );
+    recordBusinessEvent(db, {
+      event_type: 'quote_requested',
+      domain: 'maintenance',
+      importance: 'high',
+      source_table: 'quotes',
+      source_id: result.lastInsertRowid,
+      property_id: issue?.property_id || null,
+      tenant_id: issue?.tenant_id || null,
+      issue_id: req.params.id,
+      actor: actorFromUser(req.user),
+      summary: `Quote requested for issue ${issue?.uuid || req.params.id}`,
+      payload: { issue_id: req.params.id, contractor_id, description }
+    });
     res.json({ success: true, id: result.lastInsertRowid });
   } finally { db.close(); }
 });
@@ -104,6 +144,7 @@ router.put('/quotes/:id', authenticate, (req, res) => {
   try {
     const quote = db.prepare('SELECT * FROM quotes WHERE id = ?').get(req.params.id);
     if (!quote) return res.status(404).json({ error: 'Quote not found' });
+    const issue = db.prepare('SELECT id, uuid, property_id, tenant_id FROM issues WHERE id = ?').get(quote.issue_id);
 
     const updates = [], params = [];
     if (amount !== undefined) { updates.push('amount = ?'); params.push(amount); }
@@ -117,6 +158,7 @@ router.put('/quotes/:id', authenticate, (req, res) => {
     if (updates.length === 0) return res.json({ success: true });
     params.push(req.params.id);
     db.prepare(`UPDATE quotes SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+    const updatedQuote = db.prepare('SELECT * FROM quotes WHERE id = ?').get(req.params.id);
 
     // When completed, update issue final_cost and attended_by
     if (status === 'completed' && (amount || quote.amount)) {
@@ -129,6 +171,22 @@ router.put('/quotes/:id', authenticate, (req, res) => {
     db.prepare('INSERT INTO activity_log (issue_id, action, details, performed_by) VALUES (?, ?, ?, ?)').run(
       quote.issue_id, `quote_${status || 'updated'}`, `Quote #${req.params.id}: ${status || 'updated'}${amount ? ' £' + amount : ''}`, req.user.name
     );
+    recordEntityChange(db, {
+      eventType: 'quote_updated',
+      domain: 'maintenance',
+      importance: status ? 'high' : 'normal',
+      entityType: 'quotes',
+      sourceTable: 'quotes',
+      entityId: req.params.id,
+      property_id: issue?.property_id || null,
+      tenant_id: issue?.tenant_id || null,
+      issue_id: quote.issue_id,
+      actor: actorFromUser(req.user),
+      before: quote,
+      after: updatedQuote,
+      keys: ['amount', 'status', 'notes', 'quoted_at', 'approved_at', 'completed_at'],
+      summary: `Quote updated for issue ${issue?.uuid || quote.issue_id}: ${status || 'updated'}`
+    });
     res.json({ success: true });
   } finally { db.close(); }
 });

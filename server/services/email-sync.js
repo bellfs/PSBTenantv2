@@ -10,6 +10,7 @@ const { v4: uuidv4 } = require('uuid');
 const { sendNewIssueEmail } = require('./email');
 const jwt = require('jsonwebtoken');
 const { JWT_SECRET } = require('../middleware/auth');
+const { recordBusinessEvent } = require('./business-ledger');
 
 // ===== GMAIL OAUTH =====
 
@@ -102,6 +103,18 @@ async function handleGmailCallback(code, ownerPayload = {}) {
         ) VALUES (?, ?, ?, 1, ?, ?, ?, 'team_context', 30)
       `).run('gmail', email, JSON.stringify(tokens), owner.id, owner.email, owner.name).lastInsertRowid;
     }
+    recordBusinessEvent(db, {
+      event_type: existing ? 'email_account_reconnected' : 'email_account_connected',
+      domain: 'communications',
+      importance: 'high',
+      source_system: 'gmail',
+      source_table: 'email_accounts',
+      source_id: id,
+      external_id: email,
+      actor: owner.email || email || 'gmail',
+      summary: `${email} connected via Gmail OAuth`,
+      payload: { provider: 'gmail', email_address: email, connected_by_email: owner.email, connected_by_name: owner.name, connection_scope: 'team_context' }
+    });
     console.log(`[Gmail] Connected: ${email}`);
     return { id, email, provider: 'gmail' };
   } finally { db.close(); }

@@ -3,6 +3,7 @@ const { getDb } = require('../database');
 const { authenticate, requireAdmin } = require('../middleware/auth');
 const { listAgents, getAgent } = require('../agents/registry');
 const { runCodexAgent, getCodexStatus } = require('../agents/core/codex-runner');
+const { actorFromUser, recordBusinessEvent, recordEntityChange } = require('../services/business-ledger');
 
 const router = express.Router();
 router.use(authenticate);
@@ -101,6 +102,16 @@ router.post('/:key/run', async (req, res) => {
       INSERT INTO agent_events (event_type, domain, source, source_ref, actor, payload_json)
       VALUES (?, ?, ?, ?, ?, ?)
     `).run('agent_run_started', agent.domain, 'ffr_os', String(runId), req.user?.email || req.user?.name || 'unknown', JSON.stringify({ agent_key: agent.key, trigger_type, mode }));
+    recordBusinessEvent(db, {
+      event_type: 'agent_run_started',
+      domain: agent.domain,
+      importance: 'high',
+      source_table: 'agent_runs',
+      source_id: runId,
+      actor: actorFromUser(req.user),
+      summary: `${agent.name} started (${mode})`,
+      payload: { agent_key: agent.key, trigger_type, mode, input, context }
+    });
   } finally { db.close(); }
 
   try {
@@ -117,12 +128,32 @@ router.post('/:key/run', async (req, res) => {
         INSERT INTO agent_events (event_type, domain, source, source_ref, actor, payload_json)
         VALUES (?, ?, ?, ?, ?, ?)
       `).run('agent_run_completed', agent.domain, 'ffr_os', String(runId), req.user?.email || req.user?.name || 'unknown', JSON.stringify({ status: result.status, mode: result.mode }));
+      recordBusinessEvent(db2, {
+        event_type: 'agent_run_completed',
+        domain: agent.domain,
+        importance: result.status === 'failed' ? 'high' : 'normal',
+        source_table: 'agent_runs',
+        source_id: runId,
+        actor: actorFromUser(req.user),
+        summary: `${agent.name} completed with status ${result.status}`,
+        payload: { agent_key: agent.key, status: result.status, mode: result.mode, codex_command: result.codex_command, output_preview: String(result.output || '').slice(0, 1000) }
+      });
     } finally { db2.close(); }
     res.json({ id: runId, agent, result });
   } catch (error) {
     const db3 = getDb();
     try {
       db3.prepare('UPDATE agent_runs SET status = ?, error = ?, completed_at = CURRENT_TIMESTAMP WHERE id = ?').run('failed', error.message, runId);
+      recordBusinessEvent(db3, {
+        event_type: 'agent_run_failed',
+        domain: agent.domain,
+        importance: 'high',
+        source_table: 'agent_runs',
+        source_id: runId,
+        actor: actorFromUser(req.user),
+        summary: `${agent.name} failed: ${error.message}`,
+        payload: { agent_key: agent.key, error: error.message }
+      });
     } finally { db3.close(); }
     res.status(500).json({ error: error.message, id: runId });
   }
@@ -182,6 +213,21 @@ router.post('/tasks', (req, res) => {
       INSERT INTO agent_events (event_type, domain, source, source_ref, actor, payload_json)
       VALUES (?, ?, ?, ?, ?, ?)
     `).run('task_created', domain || 'operations', source || 'manual', source_ref || String(id), req.user?.email || req.user?.name || 'unknown', JSON.stringify({ task_id: id, title, priority: priority || 'medium' }));
+    recordBusinessEvent(db, {
+      event_type: 'task_created',
+      domain: domain || 'operations',
+      importance: ['urgent', 'high'].includes(priority) ? 'high' : 'normal',
+      source_table: 'agent_tasks',
+      source_id: id,
+      source_system: source || 'manual',
+      external_id: source_ref || String(id),
+      property_id: property_id || null,
+      tenant_id: tenant_id || null,
+      issue_id: issue_id || null,
+      actor: actorFromUser(req.user),
+      summary: `Task created: ${title}`,
+      payload: { title, description, priority: priority || 'medium', status: status || 'open', assigned_to, due_date }
+    });
 
     res.json({ id });
   } finally { db.close(); }
@@ -191,6 +237,7 @@ router.put('/tasks/:id', (req, res) => {
   const { title, description, domain, priority, status, assigned_to, due_date } = req.body || {};
   const db = getDb();
   try {
+    const before = db.prepare('SELECT * FROM agent_tasks WHERE id = ?').get(req.params.id);
     db.prepare(`
       UPDATE agent_tasks
       SET title = COALESCE(?, title),
@@ -203,6 +250,23 @@ router.put('/tasks/:id', (req, res) => {
           updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `).run(title || null, description || null, domain || null, priority || null, status || null, assigned_to || null, due_date || null, req.params.id);
+    const after = db.prepare('SELECT * FROM agent_tasks WHERE id = ?').get(req.params.id);
+    recordEntityChange(db, {
+      eventType: 'task_updated',
+      domain: after?.domain || before?.domain || 'operations',
+      importance: status && status !== before?.status ? 'high' : 'normal',
+      entityType: 'agent_tasks',
+      sourceTable: 'agent_tasks',
+      entityId: req.params.id,
+      property_id: after?.property_id || before?.property_id || null,
+      tenant_id: after?.tenant_id || before?.tenant_id || null,
+      issue_id: after?.issue_id || before?.issue_id || null,
+      actor: actorFromUser(req.user),
+      before,
+      after,
+      keys: ['title', 'description', 'domain', 'priority', 'status', 'assigned_to', 'due_date'],
+      summary: `Task updated: ${after?.title || before?.title || req.params.id}`
+    });
     res.json({ success: true });
   } finally { db.close(); }
 });
@@ -234,6 +298,16 @@ router.post('/approvals', requireAdmin, (req, res) => {
       INSERT INTO agent_approvals (agent_run_id, task_id, action_type, title, summary, payload_json, risk_level, requested_by)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `).run(agent_run_id || null, task_id || null, action_type, title, summary || null, JSON.stringify(payload || {}), risk_level || 'medium', req.user?.email || req.user?.name || 'unknown').lastInsertRowid;
+    recordBusinessEvent(db, {
+      event_type: 'approval_requested',
+      domain: 'operations',
+      importance: risk_level === 'high' ? 'high' : 'normal',
+      source_table: 'agent_approvals',
+      source_id: id,
+      actor: actorFromUser(req.user),
+      summary: `Approval requested: ${title}`,
+      payload: { agent_run_id, task_id, action_type, title, summary, payload, risk_level: risk_level || 'medium' }
+    });
     res.json({ id });
   } finally { db.close(); }
 });
@@ -243,11 +317,26 @@ router.put('/approvals/:id', requireAdmin, (req, res) => {
   if (!['approved', 'rejected', 'cancelled', 'pending'].includes(status)) return res.status(400).json({ error: 'invalid status' });
   const db = getDb();
   try {
+    const before = db.prepare('SELECT * FROM agent_approvals WHERE id = ?').get(req.params.id);
     db.prepare(`
       UPDATE agent_approvals
       SET status = ?, reviewed_by = ?, reviewed_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `).run(status, req.user?.email || req.user?.name || 'unknown', req.params.id);
+    const after = db.prepare('SELECT * FROM agent_approvals WHERE id = ?').get(req.params.id);
+    recordEntityChange(db, {
+      eventType: 'approval_reviewed',
+      domain: 'operations',
+      importance: 'high',
+      entityType: 'agent_approvals',
+      sourceTable: 'agent_approvals',
+      entityId: req.params.id,
+      actor: actorFromUser(req.user),
+      before,
+      after,
+      keys: ['status', 'reviewed_by', 'reviewed_at'],
+      summary: `Approval ${status}: ${after?.title || before?.title || req.params.id}`
+    });
     res.json({ success: true });
   } finally { db.close(); }
 });

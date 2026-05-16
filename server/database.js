@@ -251,6 +251,7 @@ async function initialiseDatabase() {
     connected_by_email TEXT,
     connected_by_name TEXT,
     sync_window_days INTEGER DEFAULT 30,
+    sync_past_days INTEGER DEFAULT 365,
     last_context_at DATETIME,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(provider, email_address, calendar_id)
@@ -269,9 +270,35 @@ async function initialiseDatabase() {
     html_link TEXT,
     status TEXT,
     raw_json TEXT,
+    content_hash TEXT,
+    first_seen_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    last_seen_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    cancelled_at DATETIME,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (calendar_account_id) REFERENCES calendar_accounts(id) ON DELETE CASCADE,
     UNIQUE(calendar_account_id, google_event_id)
+  )`);
+
+  db.exec(`CREATE TABLE IF NOT EXISTS calendar_event_versions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    calendar_account_id INTEGER NOT NULL,
+    calendar_event_id INTEGER,
+    google_event_id TEXT NOT NULL,
+    calendar_id TEXT DEFAULT 'primary',
+    event_hash TEXT NOT NULL,
+    summary TEXT,
+    description TEXT,
+    location TEXT,
+    start_at DATETIME,
+    end_at DATETIME,
+    html_link TEXT,
+    status TEXT,
+    raw_json TEXT,
+    first_seen_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    last_seen_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (calendar_account_id) REFERENCES calendar_accounts(id) ON DELETE CASCADE,
+    FOREIGN KEY (calendar_event_id) REFERENCES calendar_events(id) ON DELETE SET NULL,
+    UNIQUE(calendar_account_id, google_event_id, event_hash)
   )`);
 
   db.exec(`CREATE TABLE IF NOT EXISTS compliance_certificates (
@@ -311,6 +338,8 @@ async function initialiseDatabase() {
   db.exec('CREATE INDEX IF NOT EXISTS idx_email_agent_reports_date ON email_agent_reports(report_date)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_calendar_events_start ON calendar_events(start_at)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_calendar_events_account ON calendar_events(calendar_account_id)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_calendar_event_versions_event ON calendar_event_versions(calendar_account_id, google_event_id)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_calendar_event_versions_seen ON calendar_event_versions(last_seen_at)');
 
   // ===== UTILITIES MANAGEMENT TABLES =====
   db.exec(`CREATE TABLE IF NOT EXISTS meter_readings (
@@ -590,6 +619,32 @@ async function initialiseDatabase() {
     FOREIGN KEY (issue_id) REFERENCES issues(id)
   )`);
 
+  db.exec(`CREATE TABLE IF NOT EXISTS business_event_ledger (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_uid TEXT NOT NULL UNIQUE,
+    event_type TEXT NOT NULL,
+    domain TEXT DEFAULT 'operations',
+    importance TEXT DEFAULT 'normal',
+    source_system TEXT DEFAULT 'ffr_os',
+    source_table TEXT,
+    source_id TEXT,
+    external_id TEXT,
+    actor TEXT,
+    property_id INTEGER,
+    tenant_id INTEGER,
+    issue_id INTEGER,
+    happened_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    observed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    summary TEXT,
+    payload_json TEXT,
+    raw_json TEXT,
+    content_hash TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (property_id) REFERENCES properties(id),
+    FOREIGN KEY (tenant_id) REFERENCES tenants(id),
+    FOREIGN KEY (issue_id) REFERENCES issues(id)
+  )`);
+
   db.exec('CREATE INDEX IF NOT EXISTS idx_agent_runs_key ON agent_runs(agent_key)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_agent_runs_status ON agent_runs(status)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_agent_tasks_status ON agent_tasks(status)');
@@ -598,6 +653,12 @@ async function initialiseDatabase() {
   db.exec('CREATE INDEX IF NOT EXISTS idx_agent_approvals_status ON agent_approvals(status)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_agent_events_type ON agent_events(event_type)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_agent_events_domain ON agent_events(domain)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_business_event_ledger_type ON business_event_ledger(event_type)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_business_event_ledger_domain ON business_event_ledger(domain)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_business_event_ledger_source ON business_event_ledger(source_system, source_table, source_id)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_business_event_ledger_happened ON business_event_ledger(happened_at)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_business_event_ledger_property ON business_event_ledger(property_id)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_business_event_ledger_issue ON business_event_ledger(issue_id)');
 
   db.exec(`CREATE TABLE IF NOT EXISTS intake_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -704,7 +765,12 @@ async function initialiseDatabase() {
     ['calendar_accounts','connected_by_email','ALTER TABLE calendar_accounts ADD COLUMN connected_by_email TEXT'],
     ['calendar_accounts','connected_by_name','ALTER TABLE calendar_accounts ADD COLUMN connected_by_name TEXT'],
     ['calendar_accounts','sync_window_days','ALTER TABLE calendar_accounts ADD COLUMN sync_window_days INTEGER DEFAULT 30'],
+    ['calendar_accounts','sync_past_days','ALTER TABLE calendar_accounts ADD COLUMN sync_past_days INTEGER DEFAULT 365'],
     ['calendar_accounts','last_context_at','ALTER TABLE calendar_accounts ADD COLUMN last_context_at DATETIME'],
+    ['calendar_events','content_hash','ALTER TABLE calendar_events ADD COLUMN content_hash TEXT'],
+    ['calendar_events','first_seen_at','ALTER TABLE calendar_events ADD COLUMN first_seen_at DATETIME'],
+    ['calendar_events','last_seen_at','ALTER TABLE calendar_events ADD COLUMN last_seen_at DATETIME'],
+    ['calendar_events','cancelled_at','ALTER TABLE calendar_events ADD COLUMN cancelled_at DATETIME'],
   ];
   for (const [t,c,s] of cols) {
     try { db.prepare(`SELECT ${c} FROM ${t} LIMIT 0`).all(); } catch(e) {
@@ -715,6 +781,7 @@ async function initialiseDatabase() {
   db.exec('CREATE INDEX IF NOT EXISTS idx_email_accounts_owner ON email_accounts(connected_by_staff_id, connected_by_email)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_email_agent_items_kind ON email_agent_items(message_kind, is_automated)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_calendar_accounts_owner ON calendar_accounts(connected_by_staff_id, connected_by_email)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_calendar_events_hash ON calendar_events(content_hash)');
 
   // Seed admin
   if (!db.prepare('SELECT id FROM staff WHERE email = ?').get(process.env.ADMIN_EMAIL || 'admin@52oldelvet.com')) {

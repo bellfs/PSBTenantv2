@@ -32,6 +32,14 @@ router.get('/files', (req, res) => {
   }
 });
 
+router.get('/events', (req, res) => {
+  try {
+    res.json(businessMemory.listBusinessEvents(req.query || {}));
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 router.get('/file', (req, res) => {
   try {
     if (!req.query.path) return res.status(400).json({ error: 'path required' });

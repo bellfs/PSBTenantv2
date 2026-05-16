@@ -4,6 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const { getDb } = require('../database');
 const { authenticate, requireAdmin } = require('../middleware/auth');
+const { actorFromUser, recordBusinessEvent, recordEntityChange } = require('../services/business-ledger');
 
 const router = express.Router();
 
@@ -107,6 +108,17 @@ router.post('/certificates', authenticate, requireAdmin, (req, res) => {
       INSERT INTO compliance_certificates (property_id, cert_type, certificate_number, issued_date, expiry_date, status, provider, notes)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `).run(property_id, cert_type, certificate_number || null, issued_date || null, expiry_date || null, status, provider || null, notes || null).lastInsertRowid;
+    recordBusinessEvent(db, {
+      event_type: 'compliance_certificate_created',
+      domain: 'compliance',
+      importance: 'high',
+      source_table: 'compliance_certificates',
+      source_id: id,
+      property_id,
+      actor: actorFromUser(req.user),
+      summary: `${cert_type} certificate created for property #${property_id}`,
+      payload: { property_id, cert_type, certificate_number, issued_date, expiry_date, status, provider, notes }
+    });
     res.json({ id, status });
   } finally { db.close(); }
 });
@@ -116,6 +128,7 @@ router.put('/certificates/:id', authenticate, requireAdmin, (req, res) => {
   const { cert_type, certificate_number, issued_date, expiry_date, provider, notes, document_id } = req.body;
   const db = getDb();
   try {
+    const before = db.prepare('SELECT * FROM compliance_certificates WHERE id = ?').get(req.params.id);
     const now = new Date().toISOString().split('T')[0];
     let status = 'valid';
     if (expiry_date) {
@@ -130,6 +143,21 @@ router.put('/certificates/:id', authenticate, requireAdmin, (req, res) => {
         status = ?, provider = ?, notes = ?, document_id = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `).run(cert_type, certificate_number || null, issued_date || null, expiry_date || null, status, provider || null, notes || null, document_id || null, req.params.id);
+    const after = db.prepare('SELECT * FROM compliance_certificates WHERE id = ?').get(req.params.id);
+    recordEntityChange(db, {
+      eventType: 'compliance_certificate_updated',
+      domain: 'compliance',
+      importance: 'high',
+      entityType: 'compliance_certificates',
+      sourceTable: 'compliance_certificates',
+      entityId: req.params.id,
+      property_id: after?.property_id || before?.property_id || null,
+      actor: actorFromUser(req.user),
+      before,
+      after,
+      keys: ['cert_type', 'certificate_number', 'issued_date', 'expiry_date', 'status', 'provider', 'notes', 'document_id'],
+      summary: `Compliance certificate updated: ${after?.cert_type || before?.cert_type || req.params.id}`
+    });
     res.json({ success: true, status });
   } finally { db.close(); }
 });
@@ -138,7 +166,21 @@ router.put('/certificates/:id', authenticate, requireAdmin, (req, res) => {
 router.delete('/certificates/:id', authenticate, requireAdmin, (req, res) => {
   const db = getDb();
   try {
+    const cert = db.prepare('SELECT * FROM compliance_certificates WHERE id = ?').get(req.params.id);
     db.prepare('DELETE FROM compliance_certificates WHERE id = ?').run(req.params.id);
+    if (cert) {
+      recordBusinessEvent(db, {
+        event_type: 'compliance_certificate_deleted',
+        domain: 'compliance',
+        importance: 'high',
+        source_table: 'compliance_certificates',
+        source_id: req.params.id,
+        property_id: cert.property_id,
+        actor: actorFromUser(req.user),
+        summary: `Compliance certificate deleted: ${cert.cert_type}`,
+        payload: { certificate: cert }
+      });
+    }
     res.json({ success: true });
   } finally { db.close(); }
 });
@@ -185,6 +227,18 @@ router.post('/documents', authenticate, upload.single('file'), (req, res) => {
       name || req.file.originalname, filePath, ext, req.file.size,
       req.user.name, notes || null
     ).lastInsertRowid;
+    recordBusinessEvent(db, {
+      event_type: 'document_uploaded',
+      domain: 'documents',
+      importance: category === 'compliance' ? 'high' : 'normal',
+      source_table: 'documents',
+      source_id: id,
+      property_id: property_id || null,
+      tenant_id: tenant_id || null,
+      actor: actorFromUser(req.user),
+      summary: `Document uploaded: ${name || req.file.originalname}`,
+      payload: { property_id, tenant_id, category, name: name || req.file.originalname, file_path: filePath, file_type: ext, file_size: req.file.size, notes }
+    });
     res.json({ id, file_path: filePath, name: name || req.file.originalname });
   } finally { db.close(); }
 });
@@ -193,7 +247,7 @@ router.post('/documents', authenticate, upload.single('file'), (req, res) => {
 router.delete('/documents/:id', authenticate, requireAdmin, (req, res) => {
   const db = getDb();
   try {
-    const doc = db.prepare('SELECT file_path FROM documents WHERE id = ?').get(req.params.id);
+    const doc = db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id);
     if (doc) {
       // Try to remove file from disk
       const fullPath = path.join(__dirname, '..', doc.file_path);
@@ -201,6 +255,18 @@ router.delete('/documents/:id', authenticate, requireAdmin, (req, res) => {
       // Unlink from any certificates
       db.prepare('UPDATE compliance_certificates SET document_id = NULL WHERE document_id = ?').run(req.params.id);
       db.prepare('DELETE FROM documents WHERE id = ?').run(req.params.id);
+      recordBusinessEvent(db, {
+        event_type: 'document_deleted',
+        domain: 'documents',
+        importance: doc.category === 'compliance' ? 'high' : 'normal',
+        source_table: 'documents',
+        source_id: req.params.id,
+        property_id: doc.property_id || null,
+        tenant_id: doc.tenant_id || null,
+        actor: actorFromUser(req.user),
+        summary: `Document deleted: ${doc.name}`,
+        payload: { document: doc }
+      });
     }
     res.json({ success: true });
   } finally { db.close(); }

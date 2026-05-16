@@ -2,6 +2,7 @@ const express = require('express');
 const { getDb } = require('../database');
 const { authenticate, requireAdmin } = require('../middleware/auth');
 const { processIncomingMessage } = require('../services/whatsapp');
+const { actorFromUser, diffObjects, recordBusinessEvent, recordEntityChange } = require('../services/business-ledger');
 
 const router = express.Router();
 
@@ -41,13 +42,46 @@ router.get('/properties/:id/issues', authenticate, (req, res) => {
 router.post('/properties', authenticate, requireAdmin, (req, res) => {
   const { name, address, postcode, num_units } = req.body;
   const db = getDb();
-  try { res.json({ id: db.prepare('INSERT INTO properties (name, address, postcode, num_units) VALUES (?, ?, ?, ?)').run(name, address, postcode, num_units || 1).lastInsertRowid }); } finally { db.close(); }
+  try {
+    const id = db.prepare('INSERT INTO properties (name, address, postcode, num_units) VALUES (?, ?, ?, ?)').run(name, address, postcode, num_units || 1).lastInsertRowid;
+    recordBusinessEvent(db, {
+      event_type: 'property_created',
+      domain: 'portfolio',
+      importance: 'high',
+      source_table: 'properties',
+      source_id: id,
+      property_id: id,
+      actor: actorFromUser(req.user),
+      summary: `Property created: ${name}`,
+      payload: { name, address, postcode, num_units: num_units || 1 }
+    });
+    res.json({ id });
+  } finally { db.close(); }
 });
 
 router.put('/properties/:id', authenticate, requireAdmin, (req, res) => {
   const { name, address, postcode, num_units } = req.body;
   const db = getDb();
-  try { db.prepare('UPDATE properties SET name = ?, address = ?, postcode = ?, num_units = ? WHERE id = ?').run(name, address, postcode, num_units, req.params.id); res.json({ success: true }); } finally { db.close(); }
+  try {
+    const before = db.prepare('SELECT * FROM properties WHERE id = ?').get(req.params.id);
+    db.prepare('UPDATE properties SET name = ?, address = ?, postcode = ?, num_units = ? WHERE id = ?').run(name, address, postcode, num_units, req.params.id);
+    const after = db.prepare('SELECT * FROM properties WHERE id = ?').get(req.params.id);
+    recordEntityChange(db, {
+      eventType: 'property_updated',
+      domain: 'portfolio',
+      importance: 'high',
+      entityType: 'properties',
+      sourceTable: 'properties',
+      entityId: req.params.id,
+      property_id: req.params.id,
+      actor: actorFromUser(req.user),
+      before,
+      after,
+      keys: ['name', 'address', 'postcode', 'num_units'],
+      summary: `Property updated: ${after?.name || before?.name || req.params.id}`
+    });
+    res.json({ success: true });
+  } finally { db.close(); }
 });
 
 // ===== BUDGETS =====
@@ -73,7 +107,24 @@ router.put('/budgets', authenticate, requireAdmin, (req, res) => {
   if (!property_id || !year) return res.status(400).json({ error: 'property_id and year required' });
   const db = getDb();
   try {
+    const before = db.prepare('SELECT * FROM property_budgets WHERE property_id = ? AND year = ?').get(property_id, year);
     db.prepare('INSERT INTO property_budgets (property_id, year, annual_budget, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP) ON CONFLICT(property_id, year) DO UPDATE SET annual_budget = ?, updated_at = CURRENT_TIMESTAMP').run(property_id, year, annual_budget || 0, annual_budget || 0);
+    const after = db.prepare('SELECT * FROM property_budgets WHERE property_id = ? AND year = ?').get(property_id, year);
+    recordEntityChange(db, {
+      eventType: before ? 'property_budget_updated' : 'property_budget_created',
+      domain: 'finance',
+      importance: 'high',
+      entityType: 'property_budgets',
+      sourceTable: 'property_budgets',
+      entityId: after?.id || `${property_id}:${year}`,
+      property_id,
+      actor: actorFromUser(req.user),
+      before: before || {},
+      after,
+      keys: ['property_id', 'year', 'annual_budget'],
+      alwaysRecord: !before,
+      summary: `Budget ${before ? 'updated' : 'created'} for property #${property_id} (${year})`
+    });
     res.json({ success: true });
   } finally { db.close(); }
 });
@@ -137,7 +188,24 @@ router.put('/tenants/:id', authenticate, (req, res) => {
   const { name, phone, email, property_id, flat_number, student_id } = req.body;
   const db = getDb();
   try {
+    const before = db.prepare('SELECT * FROM tenants WHERE id = ?').get(req.params.id);
     db.prepare('UPDATE tenants SET name = ?, phone = ?, email = ?, property_id = ?, flat_number = ?, student_id = ? WHERE id = ?').run(name, phone, email, property_id, flat_number, student_id || null, req.params.id);
+    const after = db.prepare('SELECT * FROM tenants WHERE id = ?').get(req.params.id);
+    recordEntityChange(db, {
+      eventType: 'tenant_updated',
+      domain: 'tenants',
+      importance: 'high',
+      entityType: 'tenants',
+      sourceTable: 'tenants',
+      entityId: req.params.id,
+      property_id: after?.property_id || before?.property_id || null,
+      tenant_id: req.params.id,
+      actor: actorFromUser(req.user),
+      before,
+      after,
+      keys: ['name', 'phone', 'email', 'property_id', 'flat_number', 'student_id'],
+      summary: `Tenant updated: ${after?.name || before?.name || req.params.id}`
+    });
     res.json({ success: true });
   } finally { db.close(); }
 });
@@ -307,10 +375,28 @@ router.get('/settings', authenticate, requireAdmin, (req, res) => {
 router.put('/settings', authenticate, requireAdmin, (req, res) => {
   const db = getDb();
   try {
+    const beforeRows = db.prepare('SELECT key, value FROM settings').all();
+    const before = Object.fromEntries(beforeRows.map(row => [row.key, row.value]));
     const upsert = db.prepare('INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)');
+    const attempted = {};
     for (const [key, value] of Object.entries(req.body)) {
       if (key.includes('api_key') && typeof value === 'string' && value.includes('...')) continue;
+      attempted[key] = String(value);
       upsert.run(key, String(value));
+    }
+    const afterRows = db.prepare('SELECT key, value FROM settings').all();
+    const after = Object.fromEntries(afterRows.map(row => [row.key, row.value]));
+    const changes = diffObjects(before, after, { keys: Object.keys(attempted) });
+    if (Object.keys(changes).length) {
+      recordBusinessEvent(db, {
+        event_type: 'settings_updated',
+        domain: 'operations',
+        importance: 'high',
+        source_table: 'settings',
+        actor: actorFromUser(req.user),
+        summary: `Settings updated: ${Object.keys(changes).join(', ')}`,
+        payload: { keys: Object.keys(changes), changes }
+      });
     }
     res.json({ success: true });
   } finally { db.close(); }
@@ -503,6 +589,18 @@ Keep it professional but concise. No markdown formatting. Use plain text.`;
     const generatedAt = new Date().toISOString();
     try {
       db.prepare('UPDATE issues SET ai_report = ?, ai_report_generated_at = ? WHERE id = ?').run(report, generatedAt, req.params.id);
+      recordBusinessEvent(db, {
+        event_type: 'issue_ai_report_generated',
+        domain: 'maintenance',
+        source_table: 'issues',
+        source_id: req.params.id,
+        issue_id: req.params.id,
+        property_id: issue.property_id,
+        tenant_id: issue.tenant_id,
+        actor: actorFromUser(req.user),
+        summary: `AI report generated for issue ${issue.uuid}`,
+        payload: { issue_uuid: issue.uuid, generated_at: generatedAt, report_preview: report.slice(0, 500) }
+      });
     } catch (e) { console.error('[Report] Failed to save report to DB:', e.message); }
 
     res.json({
@@ -533,6 +631,19 @@ router.post('/issues/:id/notes', authenticate, (req, res) => {
   try {
     const id = db.prepare('INSERT INTO internal_notes (issue_id, content, author) VALUES (?, ?, ?)').run(req.params.id, content, req.user.name).lastInsertRowid;
     db.prepare('INSERT INTO activity_log (issue_id, action, details, performed_by) VALUES (?, ?, ?, ?)').run(req.params.id, 'note_added', 'Internal note added', req.user.name);
+    const issue = db.prepare('SELECT id, uuid, property_id, tenant_id FROM issues WHERE id = ?').get(req.params.id);
+    recordBusinessEvent(db, {
+      event_type: 'internal_note_added',
+      domain: 'maintenance',
+      source_table: 'internal_notes',
+      source_id: id,
+      issue_id: req.params.id,
+      property_id: issue?.property_id || null,
+      tenant_id: issue?.tenant_id || null,
+      actor: actorFromUser(req.user),
+      summary: `Internal note added to issue ${issue?.uuid || req.params.id}`,
+      payload: { note_id: id, content_preview: content.slice(0, 500) }
+    });
     res.json({ id, content, author: req.user.name, created_at: new Date().toISOString() });
   } finally { db.close(); }
 });

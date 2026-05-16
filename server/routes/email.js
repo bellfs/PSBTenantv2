@@ -3,6 +3,7 @@ const { getDb } = require('../database');
 const jwt = require('jsonwebtoken');
 const { authenticate, JWT_SECRET } = require('../middleware/auth');
 const emailSync = require('../services/email-sync');
+const { actorFromUser, recordBusinessEvent, recordEntityChange } = require('../services/business-ledger');
 
 const router = express.Router();
 
@@ -111,6 +112,17 @@ router.post('/accounts/imap', authenticate, async (req, res) => {
         `).run('imap', email_address, credentials, owner.id, owner.email, owner.name).lastInsertRowid;
       }
       console.log(`[IMAP] Connected: ${email_address} via ${host}`);
+      recordBusinessEvent(db, {
+        event_type: existing ? 'email_account_reconnected' : 'email_account_connected',
+        domain: 'communications',
+        importance: 'high',
+        source_table: 'email_accounts',
+        source_id: id,
+        external_id: email_address,
+        actor: actorFromUser(req.user),
+        summary: `${email_address} connected via IMAP`,
+        payload: { provider: 'imap', email_address, host, port: port || 993, username, connected_by_email: owner.email, connected_by_name: owner.name }
+      });
       res.json({ id, email_address, provider: 'imap' });
     } finally { db.close(); }
   } catch (e) {
@@ -127,6 +139,20 @@ router.put('/accounts/:id', authenticate, (req, res) => {
     if (!account) return res.status(404).json({ error: 'Account not found' });
     if (!canManageAccount(req.user, account)) return res.status(403).json({ error: 'You can only manage email accounts you connected.' });
     db.prepare('UPDATE email_accounts SET sync_enabled = ? WHERE id = ?').run(sync_enabled ? 1 : 0, req.params.id);
+    const after = db.prepare('SELECT * FROM email_accounts WHERE id = ?').get(req.params.id);
+    recordEntityChange(db, {
+      eventType: 'email_account_updated',
+      domain: 'communications',
+      importance: 'high',
+      entityType: 'email_accounts',
+      sourceTable: 'email_accounts',
+      entityId: req.params.id,
+      actor: actorFromUser(req.user),
+      before: account,
+      after,
+      keys: ['sync_enabled'],
+      summary: `Email account ${sync_enabled ? 'enabled' : 'paused'}: ${account.email_address}`
+    });
     res.json({ success: true });
   } finally { db.close(); }
 });
@@ -148,6 +174,17 @@ router.delete('/accounts/:id', authenticate, (req, res) => {
     `).run(req.params.id, req.params.id);
     db.prepare('DELETE FROM email_sync_log WHERE email_account_id = ?').run(req.params.id);
     db.prepare('DELETE FROM email_accounts WHERE id = ?').run(req.params.id);
+    recordBusinessEvent(db, {
+      event_type: 'email_account_deleted',
+      domain: 'communications',
+      importance: 'high',
+      source_table: 'email_accounts',
+      source_id: req.params.id,
+      external_id: account.email_address,
+      actor: actorFromUser(req.user),
+      summary: `Email account removed: ${account.email_address}`,
+      payload: { account }
+    });
     res.json({ success: true });
   } finally { db.close(); }
 });

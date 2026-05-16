@@ -3,6 +3,7 @@ const router = express.Router();
 const { getDb } = require('../database');
 const { syncAccount, categoriseTransactions } = require('../services/bank-sync');
 const { authenticate } = require('../middleware/auth');
+const { actorFromUser, recordBusinessEvent, recordEntityChange } = require('../services/business-ledger');
 
 router.use(authenticate);
 
@@ -33,6 +34,16 @@ router.post('/accounts', (req, res) => {
   const result = db.prepare(
     'INSERT INTO bank_accounts (provider, account_name, access_token) VALUES (?, ?, ?)'
   ).run(provider, account_name, access_token);
+  recordBusinessEvent(db, {
+    event_type: 'bank_account_connected',
+    domain: 'finance',
+    importance: 'high',
+    source_table: 'bank_accounts',
+    source_id: result.lastInsertRowid,
+    actor: actorFromUser(req.user),
+    summary: `${provider} bank account connected: ${account_name}`,
+    payload: { provider, account_name, access_token }
+  });
 
   res.json({ id: result.lastInsertRowid, message: 'Account connected' });
 });
@@ -43,6 +54,7 @@ router.put('/accounts/:id', (req, res) => {
   const { sync_enabled, access_token, account_name } = req.body;
   const updates = [];
   const params = [];
+  const before = db.prepare('SELECT * FROM bank_accounts WHERE id = ?').get(req.params.id);
 
   if (sync_enabled !== undefined) { updates.push('sync_enabled = ?'); params.push(sync_enabled ? 1 : 0); }
   if (access_token) { updates.push('access_token = ?'); params.push(access_token); }
@@ -52,14 +64,41 @@ router.put('/accounts/:id', (req, res) => {
 
   params.push(req.params.id);
   db.prepare(`UPDATE bank_accounts SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+  const after = db.prepare('SELECT * FROM bank_accounts WHERE id = ?').get(req.params.id);
+  recordEntityChange(db, {
+    eventType: 'bank_account_updated',
+    domain: 'finance',
+    importance: 'high',
+    entityType: 'bank_accounts',
+    sourceTable: 'bank_accounts',
+    entityId: req.params.id,
+    actor: actorFromUser(req.user),
+    before,
+    after,
+    keys: ['sync_enabled', 'access_token', 'account_name'],
+    summary: `Bank account updated: ${after?.account_name || before?.account_name || req.params.id}`
+  });
   res.json({ message: 'Account updated' });
 });
 
 // Delete account + its transactions
 router.delete('/accounts/:id', (req, res) => {
   const db = getDb();
+  const account = db.prepare('SELECT * FROM bank_accounts WHERE id = ?').get(req.params.id);
   db.prepare('DELETE FROM bank_transactions WHERE bank_account_id = ?').run(req.params.id);
   db.prepare('DELETE FROM bank_accounts WHERE id = ?').run(req.params.id);
+  if (account) {
+    recordBusinessEvent(db, {
+      event_type: 'bank_account_deleted',
+      domain: 'finance',
+      importance: 'high',
+      source_table: 'bank_accounts',
+      source_id: req.params.id,
+      actor: actorFromUser(req.user),
+      summary: `Bank account removed: ${account.account_name}`,
+      payload: { account }
+    });
+  }
   res.json({ message: 'Account removed' });
 });
 
@@ -130,8 +169,25 @@ router.put('/transactions/:id', (req, res) => {
 
   if (updates.length === 0) return res.status(400).json({ error: 'Nothing to update' });
 
+  const before = db.prepare('SELECT * FROM bank_transactions WHERE id = ?').get(req.params.id);
   params.push(req.params.id);
   db.prepare(`UPDATE bank_transactions SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+  const after = db.prepare('SELECT * FROM bank_transactions WHERE id = ?').get(req.params.id);
+  recordEntityChange(db, {
+    eventType: 'bank_transaction_updated',
+    domain: 'finance',
+    importance: 'normal',
+    entityType: 'bank_transactions',
+    sourceTable: 'bank_transactions',
+    entityId: req.params.id,
+    property_id: after?.property_id || before?.property_id || null,
+    issue_id: after?.issue_id || before?.issue_id || null,
+    actor: actorFromUser(req.user),
+    before,
+    after,
+    keys: ['property_id', 'issue_id', 'ai_category', 'notes', 'tagged_by'],
+    summary: `Bank transaction tagged: ${after?.counterparty || after?.description || req.params.id}`
+  });
   res.json({ message: 'Transaction updated' });
 });
 

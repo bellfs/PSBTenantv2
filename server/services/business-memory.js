@@ -116,7 +116,8 @@ function collectTableCounts(db) {
     'compliance_certificates', 'documents', 'meter_readings', 'utility_rates', 'utility_alerts', 'fair_usage_limits',
     'bank_transactions', 'inspections', 'intake_items', 'intake_extractions',
     'email_accounts', 'email_agent_items', 'email_agent_drafts', 'email_agent_reports',
-    'agent_tasks', 'agent_approvals', 'agent_events', 'agent_runs'
+    'calendar_accounts', 'calendar_events', 'calendar_event_versions',
+    'agent_tasks', 'agent_approvals', 'agent_events', 'agent_runs', 'business_event_ledger'
   ];
   return tables.map(table => ({ table, count: safeScalar(db, `SELECT COUNT(*) as count FROM ${table}`) }));
 }
@@ -370,6 +371,23 @@ function collectData() {
       ORDER BY report_date DESC
       LIMIT 60
     `);
+    const calendarAccounts = safeAll(db, `
+      SELECT ca.id, ca.provider, ca.email_address, ca.calendar_id, ca.calendar_name,
+        ca.last_sync_at, ca.last_context_at, ca.sync_enabled, ca.connected_by_email, ca.connected_by_name,
+        ca.sync_window_days, ca.sync_past_days, ca.created_at,
+        (SELECT COUNT(*) FROM calendar_events ce WHERE ce.calendar_account_id = ca.id) as event_count,
+        (SELECT COUNT(*) FROM calendar_event_versions cev WHERE cev.calendar_account_id = ca.id) as version_count
+      FROM calendar_accounts ca
+      ORDER BY ca.created_at DESC
+    `);
+    const calendarEvents = safeAll(db, `
+      SELECT ce.*, ca.email_address as account_email, ca.calendar_name,
+        (SELECT COUNT(*) FROM calendar_event_versions cev WHERE cev.calendar_account_id = ce.calendar_account_id AND cev.google_event_id = ce.google_event_id) as version_count
+      FROM calendar_events ce
+      LEFT JOIN calendar_accounts ca ON ca.id = ce.calendar_account_id
+      ORDER BY COALESCE(ce.start_at, ce.updated_at, ce.last_seen_at) DESC
+      LIMIT ?
+    `, [DEFAULT_LIMITS.recentRows]);
     const agentTasks = safeAll(db, `
       SELECT t.*, p.name as property_name, ten.name as tenant_name, i.uuid as issue_uuid
       FROM agent_tasks t
@@ -401,6 +419,15 @@ function collectData() {
       ORDER BY created_at DESC
       LIMIT ?
     `, [DEFAULT_LIMITS.recentShortRows]);
+    const businessLedger = safeAll(db, `
+      SELECT bel.*, p.name as property_name, ten.name as tenant_name, i.uuid as issue_uuid
+      FROM business_event_ledger bel
+      LEFT JOIN properties p ON p.id = bel.property_id
+      LEFT JOIN tenants ten ON ten.id = bel.tenant_id
+      LEFT JOIN issues i ON i.id = bel.issue_id
+      ORDER BY COALESCE(bel.happened_at, bel.observed_at, bel.created_at) DESC
+      LIMIT ?
+    `, [DEFAULT_LIMITS.recentRows]);
     const latestSnapshot = safeGet(db, `
       SELECT *
       FROM business_memory_snapshots
@@ -435,10 +462,13 @@ function collectData() {
       emailItems,
       emailDrafts,
       emailReports,
+      calendarAccounts,
+      calendarEvents,
       agentTasks,
       agentApprovals,
       agentEvents,
       agentRuns,
+      businessLedger,
       latestSnapshot
     };
   } finally {
@@ -640,6 +670,8 @@ The platform database and uploaded documents remain the source of truth. This fo
 
 - \`wiki/\` contains compiled operating knowledge by entity and lane.
 - \`wiki/context/\` contains Durham, property-facts, supplier and workmen/team context agents should read first.
+- \`wiki/calendar/\` contains connected calendar context and observed calendar event versions.
+- \`wiki/source-of-record/\` contains the append-only business event ledger.
 - \`raw/\` contains source manifests, source counts and recent communication snippets.
 - \`agents/\` contains agent run, task, approval and event memory.
 - \`daily/\` contains dated business digests.
@@ -662,7 +694,7 @@ Use this filesystem as business context before acting inside FFR Property OS.
 
 1. Start with \`wiki/index.md\` and \`INDEX.json\`.
 2. Read \`wiki/context/property-operating-facts.md\`, \`wiki/context/durham-city.md\`, \`wiki/context/email-correspondence.md\`, \`wiki/context/energy-contracts-and-suppliers.md\` and \`wiki/context/workmen-team-contractors.md\` before property, supplier, contractor or correspondence work.
-3. Treat SQLite, connected inboxes and uploaded documents as canonical where there is a conflict.
+3. Treat SQLite, connected inboxes, uploaded documents and \`wiki/source-of-record/business-event-ledger.md\` as canonical where there is a conflict.
 4. Cite source ids, file paths, task ids, issue ids and email message ids in any recommendation.
 5. Do not send messages, approve spend, alter rent/deposit positions or instruct contractors without a platform approval.
 6. Store working notes in \`notes/\`; snapshots preserve that folder.
@@ -1697,6 +1729,100 @@ ${table(data.messages.slice(0, 120), [
 `;
 }
 
+function buildCalendarPage(data, generatedAt) {
+  const cancelled = data.calendarEvents.filter(event => value(event.status).toLowerCase() === 'cancelled');
+  return `${frontmatter({
+    title: 'Calendar Source of Record',
+    type: 'calendar_memory',
+    generated_at: generatedAt
+  })}# Calendar Source of Record
+
+Calendar memory is stored in two layers: \`calendar_events\` is the latest state for each Google event, and \`calendar_event_versions\` preserves each distinct content version observed during sync. Agents should use the latest table for planning, and the version/event ledger when they need history, provenance or evidence.
+
+## Connected Calendars
+
+${table(data.calendarAccounts, [
+    { label: 'Calendar', value: row => row.calendar_name || row.calendar_id || 'Calendar' },
+    { label: 'Account', value: 'email_address' },
+    { label: 'Calendar ID', value: 'calendar_id', max: 260 },
+    { label: 'Connected by', value: row => row.connected_by_name || row.connected_by_email || 'Team account' },
+    { label: 'Events', value: 'event_count' },
+    { label: 'Versions', value: 'version_count' },
+    { label: 'Last context', value: row => row.last_context_at || row.last_sync_at || '' }
+  ])}
+
+## Recent / Current Events
+
+${table(data.calendarEvents, [
+    { label: 'Start', value: 'start_at' },
+    { label: 'End', value: 'end_at' },
+    { label: 'Summary', value: 'summary', max: 280 },
+    { label: 'Location', value: 'location', max: 220 },
+    { label: 'Status', value: 'status' },
+    { label: 'Versions', value: 'version_count' },
+    { label: 'Last seen', value: 'last_seen_at' }
+  ])}
+
+## Cancelled Events Still Preserved
+
+${table(cancelled.slice(0, 80), [
+    { label: 'Start', value: 'start_at' },
+    { label: 'Summary', value: 'summary', max: 280 },
+    { label: 'Calendar', value: row => row.calendar_name || row.calendar_id },
+    { label: 'Cancelled', value: 'cancelled_at' },
+    { label: 'Versions', value: 'version_count' }
+  ])}
+
+## Agent Rule
+
+- Calendar entries can imply check-ins, check-outs, cleanings, contractor visits, access windows, team availability and deadlines.
+- Before creating work from a calendar event, cross-reference property facts, WhatsApp/intake, email and open tasks.
+- Never erase historical calendar context; changed and cancelled events remain part of the operating record.
+`;
+}
+
+function buildBusinessLedgerPage(data, generatedAt) {
+  const highImportance = data.businessLedger.filter(event => ['high', 'critical'].includes(value(event.importance).toLowerCase()));
+  return `${frontmatter({
+    title: 'Business Event Ledger',
+    type: 'source_of_record_ledger',
+    generated_at: generatedAt
+  })}# Business Event Ledger
+
+This is the append-only operating history for FFR Property OS. It is designed as the source-of-record trail agents can query before acting: every event has a type, source system/table/id, actor, entity links, timestamp, summary, payload and hash.
+
+## Highest Importance Events
+
+${table(highImportance.slice(0, 80), [
+    { label: 'When', value: row => row.happened_at || row.observed_at || row.created_at },
+    { label: 'Type', value: 'event_type' },
+    { label: 'Domain', value: 'domain' },
+    { label: 'Source', value: row => `${row.source_system}${row.source_table ? `/${row.source_table}` : ''}${row.source_id ? `#${row.source_id}` : ''}` },
+    { label: 'Actor', value: 'actor' },
+    { label: 'Summary', value: 'summary', max: 360 }
+  ])}
+
+## Recent Events
+
+${table(data.businessLedger, [
+    { label: 'When', value: row => row.happened_at || row.observed_at || row.created_at },
+    { label: 'Type', value: 'event_type' },
+    { label: 'Domain', value: 'domain' },
+    { label: 'Importance', value: 'importance' },
+    { label: 'Source', value: row => `${row.source_system}${row.source_table ? `/${row.source_table}` : ''}${row.source_id ? `#${row.source_id}` : ''}` },
+    { label: 'Property', value: 'property_name' },
+    { label: 'Issue', value: 'issue_uuid' },
+    { label: 'Summary', value: 'summary', max: 360 }
+  ])}
+
+## Source Discipline
+
+- The ledger is for evidence and future autonomy; agents should prefer it over memory prose when asking "what actually changed?"
+- Secrets are intentionally redacted before being recorded.
+- Current-state tables still matter. The ledger explains how state got there.
+`;
+}
+
 function buildAgentRunsPage(data, generatedAt) {
   return `${frontmatter({
     title: 'Agent Runs',
@@ -1744,6 +1870,8 @@ function buildDailyDigest(data, generatedAt) {
   const todayIntake = data.intakeItems.filter(item => value(item.created_at).startsWith(todayPrefix) || value(item.occurred_at).startsWith(todayPrefix));
   const todayEmail = data.emailItems.filter(item => value(item.created_at).startsWith(todayPrefix));
   const todayEvents = data.agentEvents.filter(event => value(event.created_at).startsWith(todayPrefix));
+  const todayCalendar = data.calendarEvents.filter(event => value(event.start_at).startsWith(todayPrefix) || value(event.last_seen_at).startsWith(todayPrefix));
+  const todayLedger = data.businessLedger.filter(event => value(event.happened_at).startsWith(todayPrefix) || value(event.observed_at).startsWith(todayPrefix) || value(event.created_at).startsWith(todayPrefix));
   const openTasks = data.agentTasks.filter(task => task.status === 'open');
   const pendingApprovals = data.agentApprovals.filter(approval => approval.status === 'pending');
 
@@ -1760,7 +1888,9 @@ ${table([
     { label: 'New or updated tasks', value: todayTasks.length },
     { label: 'Intake items', value: todayIntake.length },
     { label: 'Email items', value: todayEmail.length },
+    { label: 'Calendar items', value: todayCalendar.length },
     { label: 'Agent events', value: todayEvents.length },
+    { label: 'Ledger events', value: todayLedger.length },
     { label: 'Open tasks total', value: openTasks.length },
     { label: 'Pending approvals total', value: pendingApprovals.length }
   ], [
@@ -1789,6 +1919,20 @@ ${section('Intake', table(todayIntake.slice(0, 30), [
     { label: 'Source', value: 'source_name' },
     { label: 'Sender', value: 'sender' },
     { label: 'Snippet', value: row => truncate(row.content, 320), max: 360 }
+  ]))}
+
+${section('Calendar', table(todayCalendar.slice(0, 30), [
+    { label: 'Start', value: 'start_at' },
+    { label: 'Summary', value: 'summary', max: 260 },
+    { label: 'Location', value: 'location', max: 220 },
+    { label: 'Status', value: 'status' }
+  ]))}
+
+${section('Source-of-Record Ledger', table(todayLedger.slice(0, 30), [
+    { label: 'When', value: row => row.happened_at || row.observed_at || row.created_at },
+    { label: 'Type', value: 'event_type' },
+    { label: 'Domain', value: 'domain' },
+    { label: 'Summary', value: 'summary', max: 320 }
   ]))}
 `;
 }
@@ -1873,7 +2017,9 @@ function snapshotBusinessMemory(options = {}) {
       { type: 'context', id: 'st-andrews-court', title: '35 St Andrews Court Deep Context', path: 'wiki/context/st-andrews-court.md' },
       { type: 'context', id: 'email-correspondence', title: 'Email Correspondence Context', path: 'wiki/context/email-correspondence.md' },
       { type: 'context', id: 'energy-contracts-and-suppliers', title: 'Energy Contracts and Suppliers', path: 'wiki/context/energy-contracts-and-suppliers.md' },
-      { type: 'context', id: 'workmen-team-contractors', title: 'Workmen Team and Contractors', path: 'wiki/context/workmen-team-contractors.md' }
+      { type: 'context', id: 'workmen-team-contractors', title: 'Workmen Team and Contractors', path: 'wiki/context/workmen-team-contractors.md' },
+      { type: 'calendar', id: 'calendar-source-of-record', title: 'Calendar Source of Record', path: 'wiki/calendar/source-of-record.md' },
+      { type: 'source_of_record', id: 'business-event-ledger', title: 'Business Event Ledger', path: 'wiki/source-of-record/business-event-ledger.md' }
     );
 
     bytesWritten += writeFile(root, 'wiki/index.md', buildWikiIndex(data, generatedAt, indexEntries), writtenFiles);
@@ -1883,6 +2029,8 @@ function snapshotBusinessMemory(options = {}) {
     bytesWritten += writeFile(root, 'wiki/context/email-correspondence.md', buildEmailCorrespondenceContextPage(data, generatedAt), writtenFiles);
     bytesWritten += writeFile(root, 'wiki/context/energy-contracts-and-suppliers.md', buildEnergySuppliersPage(data, generatedAt), writtenFiles);
     bytesWritten += writeFile(root, 'wiki/context/workmen-team-contractors.md', buildWorkmenTeamPage(data, generatedAt), writtenFiles);
+    bytesWritten += writeFile(root, 'wiki/calendar/source-of-record.md', buildCalendarPage(data, generatedAt), writtenFiles);
+    bytesWritten += writeFile(root, 'wiki/source-of-record/business-event-ledger.md', buildBusinessLedgerPage(data, generatedAt), writtenFiles);
 
     for (const property of data.properties) {
       bytesWritten += writeFile(root, maps.propertyPath[property.id], buildPropertyPage(property, data, maps, generatedAt), writtenFiles);
@@ -1904,6 +2052,7 @@ function snapshotBusinessMemory(options = {}) {
     bytesWritten += writeFile(root, 'wiki/operations/finance.md', buildFinancePage(data, generatedAt), writtenFiles);
     bytesWritten += writeFile(root, 'wiki/comms/email.md', buildEmailPage(data, generatedAt), writtenFiles);
     bytesWritten += writeFile(root, 'wiki/comms/whatsapp.md', buildWhatsAppPage(data, generatedAt), writtenFiles);
+    bytesWritten += writeFile(root, 'wiki/calendar/events.md', buildCalendarPage(data, generatedAt), writtenFiles);
     bytesWritten += writeFile(root, 'agents/tasks.md', buildTasksPage(data, generatedAt), writtenFiles);
     bytesWritten += writeFile(root, 'agents/approvals.md', buildApprovalsPage(data, generatedAt), writtenFiles);
     bytesWritten += writeFile(root, 'agents/runs.md', buildAgentRunsPage(data, generatedAt), writtenFiles);
@@ -1981,7 +2130,10 @@ function getMemorySummary() {
       source_counts: sourceCounts,
       open_tasks: safeScalar(db, "SELECT COUNT(*) as count FROM agent_tasks WHERE status = 'open'"),
       email_items: sourceCount(sourceCounts, 'email_agent_items'),
-      intake_items: sourceCount(sourceCounts, 'intake_items')
+      intake_items: sourceCount(sourceCounts, 'intake_items'),
+      calendar_events: sourceCount(sourceCounts, 'calendar_events'),
+      calendar_event_versions: sourceCount(sourceCounts, 'calendar_event_versions'),
+      ledger_events: sourceCount(sourceCounts, 'business_event_ledger')
     };
   } finally {
     db.close();
@@ -2006,11 +2158,43 @@ function readMemoryFile(relativePath) {
   };
 }
 
+function listBusinessEvents(options = {}) {
+  const db = getDb();
+  try {
+    const limit = Math.min(Number(options.limit) || 100, 500);
+    const params = [];
+    const where = [];
+    if (options.domain) { where.push('bel.domain = ?'); params.push(options.domain); }
+    if (options.event_type) { where.push('bel.event_type = ?'); params.push(options.event_type); }
+    if (options.source_table) { where.push('bel.source_table = ?'); params.push(options.source_table); }
+    if (options.property_id) { where.push('bel.property_id = ?'); params.push(options.property_id); }
+    if (options.issue_id) { where.push('bel.issue_id = ?'); params.push(options.issue_id); }
+    const rows = safeAll(db, `
+      SELECT bel.*, p.name as property_name, ten.name as tenant_name, i.uuid as issue_uuid
+      FROM business_event_ledger bel
+      LEFT JOIN properties p ON p.id = bel.property_id
+      LEFT JOIN tenants ten ON ten.id = bel.tenant_id
+      LEFT JOIN issues i ON i.id = bel.issue_id
+      ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+      ORDER BY COALESCE(bel.happened_at, bel.observed_at, bel.created_at) DESC
+      LIMIT ?
+    `, [...params, limit]);
+    return rows.map(row => ({
+      ...row,
+      payload: readJsonField(row, 'payload_json') || {},
+      raw: readJsonField(row, 'raw_json') || null
+    }));
+  } finally {
+    db.close();
+  }
+}
+
 module.exports = {
   memoryRoot,
   ensureRoot,
   snapshotBusinessMemory,
   getMemorySummary,
   listMemoryFiles,
-  readMemoryFile
+  readMemoryFile,
+  listBusinessEvents
 };
