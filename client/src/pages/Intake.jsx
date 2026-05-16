@@ -50,7 +50,7 @@ export default function Intake() {
     setAgentRun({ loading: true, extraction_id: extraction.id });
     try {
       const response = await api.runAgent(extraction.agent_key, {
-        mode: 'dry_run',
+        mode: 'execute',
         trigger_type: 'intake_suggestion',
         input: {
           request: extraction.summary,

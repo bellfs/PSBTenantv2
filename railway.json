@@ -5,7 +5,7 @@
     "buildCommand": "cd client && npm install --include=dev && npm run build"
   },
   "deploy": {
-    "startCommand": "node server/index.js",
+    "startCommand": "CODEX_AGENT_MODE=execute CODEX_AGENT_SANDBOX=read-only node server/index.js",
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 10
   }

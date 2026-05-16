@@ -21,17 +21,18 @@ const riskBadge = {
   high: 'badge-urgent',
 };
 
-function RunPanel({ agent, onRunComplete }) {
+function RunPanel({ agent, codexMode, onRunComplete }) {
   const [input, setInput] = useState('');
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState(null);
+  const executionMode = codexMode === 'execute' ? 'execute' : 'dry_run';
 
   const run = async () => {
     setRunning(true);
     setResult(null);
     try {
       const response = await api.runAgent(agent.key, {
-        mode: 'dry_run',
+        mode: executionMode,
         trigger_type: 'manual',
         input: { request: input || `Run a ${agent.name} operating check.` },
         context: { source: 'agent_console' }
@@ -67,9 +68,9 @@ function RunPanel({ agent, onRunComplete }) {
         }}
       />
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
-        <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>Dry run · Codex read-only</span>
+        <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>{executionMode === 'execute' ? 'Live Codex' : 'Dry run'} · read-only sandbox</span>
         <button className="btn btn-primary btn-sm" onClick={run} disabled={running}>
-          {running ? <Clock size={14} /> : <Play size={14} />} {running ? 'Preparing' : 'Preview Run'}
+          {running ? <Clock size={14} /> : <Play size={14} />} {running ? 'Running' : executionMode === 'execute' ? 'Run Agent' : 'Preview Run'}
         </button>
       </div>
       {result && (
@@ -192,7 +193,7 @@ export default function Agents() {
                   </div>
                 </div>
               </div>
-              <RunPanel agent={selected} onRunComplete={load} />
+              <RunPanel agent={selected} codexMode={data.codex.mode} onRunComplete={load} />
             </div>
           </div>
         )}

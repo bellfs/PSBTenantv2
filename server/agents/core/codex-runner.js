@@ -1,8 +1,11 @@
 const { execFile } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
+const { spawn } = require('child_process');
 const { promisify } = require('util');
 const { getAgent } = require('../registry');
+const { getDb } = require('../../database');
 
 const execFileAsync = promisify(execFile);
 
@@ -23,6 +26,97 @@ function codexCandidates() {
     '/usr/bin/codex',
     'codex'
   ].filter(Boolean).filter((value, index, values) => values.indexOf(value) === index);
+}
+
+function getStoredOpenAIKey() {
+  if (process.env.OPENAI_API_KEY) return process.env.OPENAI_API_KEY;
+  try {
+    const db = getDb();
+    const row = db.prepare("SELECT value FROM settings WHERE key = 'openai_api_key'").get();
+    db.close();
+    return row?.value && row.value.length > 10 ? row.value : null;
+  } catch {
+    return null;
+  }
+}
+
+function buildCodexEnv() {
+  const env = { ...process.env };
+  env.CODEX_HOME = env.CODEX_HOME || path.join(os.tmpdir(), 'ffr-property-os-codex');
+  env.CI = env.CI || '1';
+  if (!env.OPENAI_API_KEY) {
+    const storedKey = getStoredOpenAIKey();
+    if (storedKey) env.OPENAI_API_KEY = storedKey;
+  }
+  return env;
+}
+
+function execFileWithInput(command, args, input, options = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      cwd: options.cwd,
+      env: options.env,
+      stdio: ['pipe', 'pipe', 'pipe']
+    });
+    let stdout = '';
+    let stderr = '';
+    let timedOut = false;
+    const timer = options.timeout ? setTimeout(() => {
+      timedOut = true;
+      child.kill('SIGTERM');
+    }, options.timeout) : null;
+
+    child.stdout.on('data', chunk => { stdout += chunk.toString(); });
+    child.stderr.on('data', chunk => { stderr += chunk.toString(); });
+    child.on('error', error => {
+      if (timer) clearTimeout(timer);
+      reject(error);
+    });
+    child.on('close', code => {
+      if (timer) clearTimeout(timer);
+      if (timedOut) return reject(new Error('Timed out while authenticating Codex CLI'));
+      if (code === 0) return resolve({ stdout, stderr });
+      const error = new Error(stderr || stdout || `Process exited with code ${code}`);
+      error.code = code;
+      error.stdout = stdout;
+      error.stderr = stderr;
+      reject(error);
+    });
+
+    child.stdin.end(input || '');
+  });
+}
+
+async function ensureCodexAuthenticated(codexStatus) {
+  const env = buildCodexEnv();
+  fs.mkdirSync(env.CODEX_HOME, { recursive: true });
+  const authPath = path.join(env.CODEX_HOME, 'auth.json');
+  if (fs.existsSync(authPath)) return { ok: true, method: 'cached_api_key', env };
+
+  if (!env.OPENAI_API_KEY) {
+    return {
+      ok: false,
+      env,
+      error: 'Codex CLI is installed, but no OPENAI_API_KEY is available in Railway env vars or FFR Property OS settings.'
+    };
+  }
+
+  try {
+    await execFileWithInput(
+      codexStatus.command,
+      ['login', '--with-api-key'],
+      `${env.OPENAI_API_KEY}\n`,
+      { env, timeout: Number(process.env.CODEX_LOGIN_TIMEOUT_MS || 30000) }
+    );
+    return { ok: true, method: 'api_key_login', env };
+  } catch (error) {
+    return {
+      ok: false,
+      env,
+      error: `Codex CLI API-key login failed: ${error.message}`,
+      stderr: error.stderr || null
+    };
+  }
 }
 
 async function getCodexStatus() {
@@ -110,7 +204,7 @@ function getCodexCommand(prompt, options = {}, commandOverride = CODEX_BIN) {
   const sandbox = options.sandbox || process.env.CODEX_AGENT_SANDBOX || 'read-only';
   const model = options.model || process.env.CODEX_AGENT_MODEL;
   const cwd = options.cwd || DEFAULT_WORKSPACE;
-  const args = ['exec', '--cd', cwd, '--sandbox', sandbox, '--ask-for-approval', 'never', '--ephemeral'];
+  const args = ['exec', '--cd', cwd, '--sandbox', sandbox, '-c', 'approval_policy="never"', '--ephemeral', '--ignore-user-config'];
   if (model) args.push('--model', model);
   args.push(prompt);
   return { command: commandOverride, args };
@@ -162,8 +256,22 @@ async function runCodexAgent({ agentKey, input = {}, context = {}, mode = 'dry_r
     };
   }
 
+  const auth = await ensureCodexAuthenticated(codexStatus);
+  if (!auth.ok) {
+    return {
+      status: 'blocked',
+      mode,
+      output: auth.error,
+      codex_version: codexStatus.version,
+      codex_command: commandPreview,
+      codex_diagnostics: { ...codexStatus, auth_error: auth.error },
+      prompt_preview: prompt
+    };
+  }
+
   const { stdout, stderr } = await execFileAsync(command, args, {
     cwd: options.cwd || DEFAULT_WORKSPACE,
+    env: auth.env,
     timeout: Number(process.env.CODEX_AGENT_TIMEOUT_MS || 120000),
     maxBuffer: 1024 * 1024 * 5
   });
@@ -174,7 +282,7 @@ async function runCodexAgent({ agentKey, input = {}, context = {}, mode = 'dry_r
     output: stdout.trim() || stderr.trim(),
     codex_version: codexStatus.version,
     codex_command: commandPreview,
-    codex_diagnostics: codexStatus,
+    codex_diagnostics: { ...codexStatus, auth_method: auth.method },
     prompt_preview: prompt
   };
 }
