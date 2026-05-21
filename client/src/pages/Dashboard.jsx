@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../utils/api';
-import { AlertCircle, Clock, CheckCircle, AlertTriangle, Zap, TrendingUp, ShieldCheck, XCircle, ArrowUpRight, Activity, Timer, Bot, Flame, PoundSterling, Wallet, PieChart, CalendarRange, Image, MessageSquareWarning, Landmark, TrendingDown } from 'lucide-react';
+import { AlertCircle, Clock, CheckCircle, AlertTriangle, Zap, TrendingUp, ShieldCheck, XCircle, ArrowUpRight, Activity, Timer, Bot, Flame, PoundSterling, Wallet, PieChart, CalendarRange, Image, MessageSquareWarning, Landmark, TrendingDown, BedDouble } from 'lucide-react';
 
 function timeAgo(dateStr) {
   if (!dateStr) return '';
@@ -21,6 +21,10 @@ function timeAgo(dateStr) {
   return `${years}y ago`;
 }
 
+function money(value) {
+  return `£${Number(value || 0).toLocaleString('en-GB', { maximumFractionDigits: 0 })}`;
+}
+
 const statusColors = {
   open: { bg: 'rgba(99,102,241,0.12)', color: 'var(--accent-light)', dot: '#6366f1' },
   in_progress: { bg: 'rgba(251,191,36,0.12)', color: 'var(--warning)', dot: '#fbbf24' },
@@ -36,6 +40,7 @@ export default function Dashboard() {
   const [compliance, setCompliance] = useState(null);
   const [utilities, setUtilities] = useState(null);
   const [finance, setFinance] = useState(null);
+  const [shortLets, setShortLets] = useState(null);
   useEffect(() => {
     api.getIssueStats().then(setStats);
     api.getSlaMetrics().then(setSla).catch(() => {});
@@ -43,6 +48,7 @@ export default function Dashboard() {
     api.getComplianceSummary().then(setCompliance).catch(() => {});
     api.getUtilityAnalytics(2025).then(setUtilities).catch(() => {});
     api.getFinanceSummary({ months: 3 }).then(setFinance).catch(() => {});
+    api.getGuestySummary().then(setShortLets).catch(() => {});
   }, []);
   if (!stats) return <div style={{ padding: 40, textAlign: 'center' }}><div className="loading-spinner" style={{ margin: '0 auto' }} /></div>;
 
@@ -205,6 +211,64 @@ export default function Dashboard() {
           );
         })()}
       </div>
+
+      {shortLets && (
+        <div className="card" style={{ marginBottom: 12 }}>
+          <div className="card-header" style={{ padding: '12px 16px' }}>
+            <h3 style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14 }}>
+              <BedDouble size={15} style={{ color: 'var(--accent-light)' }} />
+              Short-Let Performance
+            </h3>
+            <Link to="/short-lets" className="btn btn-ghost btn-sm" style={{ fontSize: 12 }}>
+              Open <ArrowUpRight size={12} />
+            </Link>
+          </div>
+          <div className="card-body" style={{ padding: '12px 16px' }}>
+            <div className="utility-summary-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 12 }}>
+              <div style={{ textAlign: 'center', padding: '14px 8px', borderRadius: 'var(--radius-md)', background: 'rgba(52,211,153,0.06)', border: '1px solid rgba(52,211,153,0.1)' }}>
+                <TrendingUp size={16} style={{ color: 'var(--success)', marginBottom: 6 }} />
+                <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--success)' }}>{money(shortLets.totals?.next_30?.booked_revenue)}</div>
+                <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 3, fontWeight: 500 }}>Booked next 30d</div>
+              </div>
+              <div style={{ textAlign: 'center', padding: '14px 8px', borderRadius: 'var(--radius-md)', background: 'rgba(99,102,241,0.06)', border: '1px solid rgba(99,102,241,0.1)' }}>
+                <Activity size={16} style={{ color: 'var(--accent-light)', marginBottom: 6 }} />
+                <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--accent-light)' }}>{shortLets.totals?.next_30?.occupancy_pct || 0}%</div>
+                <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 3, fontWeight: 500 }}>Occupancy next 30d</div>
+              </div>
+              <div style={{ textAlign: 'center', padding: '14px 8px', borderRadius: 'var(--radius-md)', background: 'rgba(251,191,36,0.06)', border: '1px solid rgba(251,191,36,0.1)' }}>
+                <CalendarRange size={16} style={{ color: 'var(--warning)', marginBottom: 6 }} />
+                <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--warning)' }}>{shortLets.totals?.next_30?.gap_nights || 0}</div>
+                <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 3, fontWeight: 500 }}>Gap nights</div>
+              </div>
+              <div style={{ textAlign: 'center', padding: '14px 8px', borderRadius: 'var(--radius-md)', background: 'rgba(34,211,238,0.06)', border: '1px solid rgba(34,211,238,0.1)' }}>
+                <BedDouble size={16} style={{ color: '#22d3ee', marginBottom: 6 }} />
+                <div style={{ fontSize: 20, fontWeight: 800, color: '#22d3ee' }}>{shortLets.totals?.checkins_today || 0}/{shortLets.totals?.checkouts_today || 0}</div>
+                <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 3, fontWeight: 500 }}>Check-ins / outs today</div>
+              </div>
+            </div>
+            {shortLets.properties?.length > 0 && (
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 8 }}>Properties</div>
+                {shortLets.properties.slice(0, 5).map((p, i) => {
+                  const maxVal = Math.max(...shortLets.properties.map(x => Number(x.revenue_30 || 0)), 1);
+                  const pct = (Number(p.revenue_30 || 0) / maxVal) * 100;
+                  return (
+                    <div key={`${p.property_id || p.property_name}-${i}`} style={{ marginBottom: i < 4 ? 8 : 0 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                        <span style={{ fontSize: 12, color: 'var(--text-primary)', fontWeight: 450 }}>{p.property_name}</span>
+                        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--accent-light)' }}>{p.occupancy_30}% · {money(p.revenue_30)}</span>
+                      </div>
+                      <div style={{ height: 5, background: 'rgba(99,102,241,0.06)', borderRadius: 3, overflow: 'hidden' }}>
+                        <div style={{ height: '100%', width: `${pct}%`, background: 'linear-gradient(90deg, #22d3ee, #6366f1)', borderRadius: 3 }} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Performance Metrics - side by side with Recent Issues */}
       <div className="dashboard-perf-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>

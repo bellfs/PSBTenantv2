@@ -542,6 +542,149 @@ async function initialiseDatabase() {
   db.exec('CREATE INDEX IF NOT EXISTS idx_bank_txn_category ON bank_transactions(ai_category)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_bank_txn_direction ON bank_transactions(direction)');
 
+  // ===== GUESTY / SHORT-LET PERFORMANCE TABLES =====
+  db.exec(`CREATE TABLE IF NOT EXISTS guesty_accounts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_name TEXT NOT NULL DEFAULT 'Guesty',
+    client_id TEXT,
+    client_secret TEXT,
+    access_token TEXT,
+    token_expires_at DATETIME,
+    guesty_account_id TEXT,
+    webhook_id TEXT,
+    webhook_url TEXT,
+    webhook_events_json TEXT,
+    webhook_secret TEXT,
+    sync_enabled INTEGER DEFAULT 1,
+    last_sync_at DATETIME,
+    last_webhook_at DATETIME,
+    connected_by_staff_id INTEGER,
+    connected_by_email TEXT,
+    connected_by_name TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  db.exec(`CREATE TABLE IF NOT EXISTS guesty_listings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guesty_account_id INTEGER NOT NULL,
+    guesty_listing_id TEXT NOT NULL,
+    property_id INTEGER,
+    nickname TEXT,
+    title TEXT,
+    address TEXT,
+    city TEXT,
+    bedrooms REAL,
+    bathrooms REAL,
+    accommodates INTEGER,
+    listing_type TEXT,
+    active INTEGER DEFAULT 1,
+    is_listed INTEGER DEFAULT 1,
+    raw_json TEXT,
+    content_hash TEXT,
+    first_seen_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    last_seen_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (guesty_account_id) REFERENCES guesty_accounts(id) ON DELETE CASCADE,
+    FOREIGN KEY (property_id) REFERENCES properties(id),
+    UNIQUE(guesty_account_id, guesty_listing_id)
+  )`);
+
+  db.exec(`CREATE TABLE IF NOT EXISTS guesty_reservations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guesty_account_id INTEGER NOT NULL,
+    guesty_reservation_id TEXT NOT NULL,
+    guesty_listing_id TEXT,
+    property_id INTEGER,
+    confirmation_code TEXT,
+    status TEXT,
+    source TEXT,
+    channel TEXT,
+    guest_name TEXT,
+    guest_email TEXT,
+    check_in DATE,
+    check_out DATE,
+    nights INTEGER DEFAULT 0,
+    guests_count INTEGER DEFAULT 0,
+    booked_at DATETIME,
+    imported_at DATETIME,
+    cancelled_at DATETIME,
+    last_updated_at DATETIME,
+    accommodation_fare REAL DEFAULT 0,
+    cleaning_fee REAL DEFAULT 0,
+    host_payout REAL DEFAULT 0,
+    total_paid REAL DEFAULT 0,
+    total_price REAL DEFAULT 0,
+    currency TEXT DEFAULT 'GBP',
+    raw_json TEXT,
+    content_hash TEXT,
+    first_seen_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    last_seen_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (guesty_account_id) REFERENCES guesty_accounts(id) ON DELETE CASCADE,
+    FOREIGN KEY (property_id) REFERENCES properties(id),
+    UNIQUE(guesty_account_id, guesty_reservation_id)
+  )`);
+
+  db.exec(`CREATE TABLE IF NOT EXISTS guesty_reservation_versions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guesty_account_id INTEGER NOT NULL,
+    reservation_id INTEGER,
+    guesty_reservation_id TEXT NOT NULL,
+    event_type TEXT,
+    content_hash TEXT NOT NULL,
+    raw_json TEXT,
+    observed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (guesty_account_id) REFERENCES guesty_accounts(id) ON DELETE CASCADE,
+    FOREIGN KEY (reservation_id) REFERENCES guesty_reservations(id) ON DELETE SET NULL,
+    UNIQUE(guesty_account_id, guesty_reservation_id, content_hash)
+  )`);
+
+  db.exec(`CREATE TABLE IF NOT EXISTS guesty_webhook_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_uid TEXT NOT NULL UNIQUE,
+    guesty_account_id INTEGER,
+    event_type TEXT,
+    external_id TEXT,
+    status TEXT DEFAULT 'received',
+    raw_json TEXT,
+    received_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    processed_at DATETIME,
+    error TEXT,
+    FOREIGN KEY (guesty_account_id) REFERENCES guesty_accounts(id) ON DELETE SET NULL
+  )`);
+
+  db.exec(`CREATE TABLE IF NOT EXISTS guesty_daily_metrics (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guesty_account_id INTEGER NOT NULL,
+    property_id INTEGER,
+    guesty_listing_id TEXT NOT NULL,
+    metric_date DATE NOT NULL,
+    available_nights INTEGER DEFAULT 1,
+    occupied_nights INTEGER DEFAULT 0,
+    booked_revenue REAL DEFAULT 0,
+    booked_net_revenue REAL DEFAULT 0,
+    adr REAL DEFAULT 0,
+    revpar REAL DEFAULT 0,
+    currency TEXT DEFAULT 'GBP',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (guesty_account_id) REFERENCES guesty_accounts(id) ON DELETE CASCADE,
+    FOREIGN KEY (property_id) REFERENCES properties(id),
+    UNIQUE(guesty_account_id, guesty_listing_id, metric_date)
+  )`);
+
+  db.exec('CREATE INDEX IF NOT EXISTS idx_guesty_accounts_sync ON guesty_accounts(sync_enabled)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_guesty_listings_property ON guesty_listings(property_id)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_guesty_listings_external ON guesty_listings(guesty_account_id, guesty_listing_id)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_guesty_reservations_dates ON guesty_reservations(check_in, check_out)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_guesty_reservations_status ON guesty_reservations(status)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_guesty_reservations_property ON guesty_reservations(property_id)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_guesty_versions_external ON guesty_reservation_versions(guesty_account_id, guesty_reservation_id)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_guesty_webhooks_type ON guesty_webhook_events(event_type, received_at)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_guesty_metrics_date ON guesty_daily_metrics(metric_date)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_guesty_metrics_property ON guesty_daily_metrics(property_id, metric_date)');
+
   // ===== FFR PROPERTY OS / AGENTIC WORKFLOW TABLES =====
   db.exec(`CREATE TABLE IF NOT EXISTS agent_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

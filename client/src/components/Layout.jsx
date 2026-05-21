@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../App';
-import { LayoutDashboard, AlertCircle, Building2, Users, Settings, LogOut, Wrench, BarChart3, Menu, X, HardHat, ShieldCheck, CalendarRange, Zap, Sparkles, ClipboardCheck, ClipboardList, Landmark, Workflow, Bot, Inbox, MailCheck, Database } from 'lucide-react';
+import { LayoutDashboard, AlertCircle, Building2, Users, Settings, LogOut, Wrench, BarChart3, Menu, X, HardHat, ShieldCheck, CalendarRange, Zap, Sparkles, ClipboardCheck, ClipboardList, Landmark, Workflow, Bot, Inbox, MailCheck, Database, BedDouble } from 'lucide-react';
 import CopilotPanel from './CopilotPanel';
 
 // Page-contextual placeholder suggestions that rotate
@@ -43,6 +43,12 @@ const PAGE_SUGGESTIONS = {
     'What replies need approval?',
     'Generate today\'s team email brief',
     'Which email follow-ups are open?',
+  ],
+  '/short-lets': [
+    'What are short-let bookings doing?',
+    'Any check-ins or check-outs today?',
+    'Show Guesty gap nights',
+    'Run the Short-Let Operator',
   ],
   '/business-memory': [
     'Generate a business memory snapshot',
@@ -207,6 +213,7 @@ export default function Layout() {
       </NavSection>
 
       <NavSection label="Business Control">
+        <SidebarLink to="/short-lets" icon={BedDouble} label="Short Lets" />
         <SidebarLink to="/compliance" icon={ShieldCheck} label="Compliance" />
         <SidebarLink to="/finance" icon={Landmark} label="Finance" />
         <SidebarLink to="/utilities" icon={Zap} label="Utilities" />

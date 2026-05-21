@@ -3,6 +3,7 @@ const { getDb } = require('../database');
 const { authenticate } = require('../middleware/auth');
 const { listAgents } = require('../agents/registry');
 const { getCodexVersion } = require('../agents/core/codex-runner');
+const { getPerformanceSummary } = require('../services/guesty');
 
 const router = express.Router();
 router.use(authenticate);
@@ -51,7 +52,9 @@ function buildLane({ name, score, owner, agent_key, signals, href }) {
   };
 }
 
-function buildLaneHealth({ issueCounts, taskCounts, emailCounts, approvalCounts, complianceCounts, intakeCounts, calendarConnected, memoryFresh, financeUncategorised }) {
+function buildLaneHealth({ issueCounts, taskCounts, emailCounts, approvalCounts, complianceCounts, intakeCounts, calendarConnected, memoryFresh, financeUncategorised, shortLets }) {
+  const shortLetTotals = shortLets?.totals || {};
+  const shortLetNext30 = shortLetTotals.next_30 || {};
   return [
     buildLane({
       name: 'Inbox & Admin',
@@ -102,6 +105,20 @@ function buildLaneHealth({ issueCounts, taskCounts, emailCounts, approvalCounts,
       ]
     }),
     buildLane({
+      name: 'Short Lets',
+      score: shortLets?.connected
+        ? 88 - Math.min(shortLetTotals.payment_failed_events_30d || 0, 5) * 14 - Math.min(shortLetTotals.unlinked_listings || 0, 5) * 8 - Math.min(shortLetTotals.open_short_let_tasks || 0, 8) * 5
+        : 42,
+      owner: 'Hannah / Fergus',
+      agent_key: 'short_let_operator',
+      href: '/short-lets',
+      signals: [
+        shortLets?.connected ? `${shortLetTotals.listings || 0} active Guesty listings` : 'Guesty not connected',
+        `${shortLetNext30.occupancy_pct || 0}% occupancy next 30 days`,
+        `${shortLetTotals.checkins_today || 0} check-ins and ${shortLetTotals.checkouts_today || 0} check-outs today`
+      ]
+    }),
+    buildLane({
       name: 'Finance & Suppliers',
       score: 88 - Math.min(financeUncategorised, 30) - (approvalCounts.pending * 2),
       owner: 'Fergus / Hannah',
@@ -128,8 +145,10 @@ function buildLaneHealth({ issueCounts, taskCounts, emailCounts, approvalCounts,
   ];
 }
 
-function buildNextActions({ issueCounts, taskCounts, emailCounts, approvalCounts, complianceCounts, intakeCounts, calendarConnected, memoryFresh }) {
+function buildNextActions({ issueCounts, taskCounts, emailCounts, approvalCounts, complianceCounts, intakeCounts, calendarConnected, memoryFresh, shortLets }) {
   const actions = [];
+  const shortLetTotals = shortLets?.totals || {};
+  const shortLetNext30 = shortLetTotals.next_30 || {};
   if (emailCounts.needs_reply || emailCounts.draft_replies) {
     actions.push({
       title: 'Clear email replies before new work starts',
@@ -190,6 +209,33 @@ function buildNextActions({ issueCounts, taskCounts, emailCounts, approvalCounts
       prompt: 'Review recent intake extractions and consolidate duplicate or unclear jobs into a prioritised task list with property, owner, due date and approval risks.'
     });
   }
+  if (!shortLets?.connected) {
+    actions.push({
+      title: 'Connect Guesty short-let data',
+      detail: 'Guesty is not yet connected, so STR revenue, OTA channel mix, reservations and guest-message triggers are not fully visible.',
+      href: '/short-lets',
+      action: 'Open Short Lets',
+      agent_key: null
+    });
+  } else if ((shortLetTotals.payment_failed_events_30d || 0) || (shortLetTotals.open_short_let_tasks || 0)) {
+    actions.push({
+      title: 'Clear short-let guest/payment actions',
+      detail: `${shortLetTotals.payment_failed_events_30d || 0} payment failures and ${shortLetTotals.open_short_let_tasks || 0} open short-let tasks are visible.`,
+      href: '/short-lets',
+      action: 'Run operator',
+      agent_key: 'short_let_operator',
+      prompt: 'Review Guesty reservations, guest messages, payment failures, check-ins, check-outs, gap nights and channel mix. Produce a short action plan with owners and approval needs.'
+    });
+  } else if ((shortLetNext30.gap_nights || 0) >= 7) {
+    actions.push({
+      title: 'Review short-let gap nights',
+      detail: `${shortLetNext30.gap_nights} available nights are unbooked in the next 30 days.`,
+      href: '/short-lets',
+      action: 'Run operator',
+      agent_key: 'short_let_operator',
+      prompt: 'Review upcoming Guesty gap nights by property and channel. Recommend pricing, availability, guest-comms or cleaning/calendar actions that require approval.'
+    });
+  }
   if (!calendarConnected) {
     actions.push({
       title: 'Connect shared calendar',
@@ -234,7 +280,7 @@ function buildAgentSuggestions(nextActions) {
     }));
 }
 
-function buildCommandBrief({ issueCounts, taskCounts, emailCounts, approvalCounts, complianceCounts, calendarConnected, memoryFresh }) {
+function buildCommandBrief({ issueCounts, taskCounts, emailCounts, approvalCounts, complianceCounts, calendarConnected, memoryFresh, shortLets }) {
   const blockers = [];
   if (issueCounts.urgent || issueCounts.escalated) blockers.push('urgent maintenance');
   if (approvalCounts.pending) blockers.push('pending approvals');
@@ -248,6 +294,9 @@ function buildCommandBrief({ issueCounts, taskCounts, emailCounts, approvalCount
   const summary = [
     `${issueCounts.open} open issues, ${taskCounts.open} open agent tasks and ${approvalCounts.pending} pending approvals are visible.`,
     `${emailCounts.needs_reply} emails need reply and ${emailCounts.draft_replies} draft replies are waiting.`,
+    shortLets?.connected
+      ? `Short lets: ${shortLets.totals?.next_30?.occupancy_pct || 0}% occupancy and GBP ${Math.round(shortLets.totals?.next_30?.booked_revenue || 0)} booked revenue over the next 30 days.`
+      : 'Guesty short-let context is not connected yet.',
     calendarConnected ? 'Calendar context is connected.' : 'Calendar context is not connected yet.',
     memoryFresh ? 'Business Memory has been refreshed today.' : 'Business Memory has not been refreshed today.'
   ];
@@ -260,11 +309,12 @@ function buildCommandBrief({ issueCounts, taskCounts, emailCounts, approvalCount
   };
 }
 
-function buildAutonomyStatus({ emailAccounts, calendarConnected, memoryFresh, ledgerEvents, approvalCounts }) {
+function buildAutonomyStatus({ emailAccounts, calendarConnected, memoryFresh, ledgerEvents, approvalCounts, guestyConnected }) {
   const score = clamp(
     35 +
     (emailAccounts ? 15 : 0) +
     (calendarConnected ? 15 : 0) +
+    (guestyConnected ? 10 : 0) +
     (memoryFresh ? 15 : 0) +
     (ledgerEvents ? 10 : 0) -
     Math.min(approvalCounts.pending * 2, 20)
@@ -282,6 +332,7 @@ function buildAutonomyStatus({ emailAccounts, calendarConnected, memoryFresh, le
     gaps: [
       emailAccounts ? null : 'Connect the core team inboxes.',
       calendarConnected ? null : 'Connect shared Google Calendar.',
+      guestyConnected ? null : 'Connect Guesty short-let performance.',
       memoryFresh ? null : 'Refresh Business Memory today.',
       ledgerEvents ? null : 'Generate more source-of-record ledger events.'
     ].filter(Boolean)
@@ -368,6 +419,13 @@ router.get('/overview', async (req, res) => {
         detail: 'Bank connections, transaction categorisation, property tagging and P&L foundations.'
       },
       {
+        key: 'short_lets',
+        name: 'Short Lets',
+        count: scalar(db, 'SELECT COUNT(*) FROM guesty_reservations'),
+        status: scalar(db, 'SELECT COUNT(*) FROM guesty_accounts WHERE sync_enabled = 1') ? 'live' : 'connect',
+        detail: 'Guesty listings, reservations, OTA channel mix, webhooks, payments, calendar changes and STR performance metrics.'
+      },
+      {
         key: 'agents',
         name: 'Agents',
         count: agents.length,
@@ -418,7 +476,8 @@ router.get('/overview', async (req, res) => {
     `);
 
     const lanes = [
-      { name: 'Lettings & Revenue', agents: ['leasing_revenue', 'short_let_operator'], next: 'Lead/viewing/reservation tables and enquiry import.' },
+      { name: 'Lettings & Revenue', agents: ['leasing_revenue'], next: 'Lead/viewing/reservation tables and enquiry import.' },
+      { name: 'Short Lets', agents: ['short_let_operator'], next: 'Use Guesty sync/webhooks as the STR source of record for bookings, payments, messages and performance.' },
       { name: 'Tenant Ops & Maintenance', agents: ['maintenance_triage', 'turnaround_orchestrator'], next: 'Convert chat/job lists into tasks with property, owner and due date.' },
       { name: 'Compliance & Risk', agents: ['compliance_guardian'], next: 'Expand certificate requirements into a per-property compliance matrix.' },
       { name: 'Money & Suppliers', agents: ['finance_reconciler', 'utilities_procurement', 'contractor_value'], next: 'Invoice and supplier-document intake with approval workflow.' },
@@ -591,6 +650,7 @@ router.get('/today', (req, res) => {
          OR LOWER(COALESCE(ai_category, category, '')) LIKE '%other%'
     `);
     const calendarConnected = calendarAccounts.some(account => account.sync_enabled);
+    const shortLets = getPerformanceSummary(db);
     const laneHealth = buildLaneHealth({
       issueCounts,
       taskCounts,
@@ -600,7 +660,8 @@ router.get('/today', (req, res) => {
       intakeCounts,
       calendarConnected,
       memoryFresh,
-      financeUncategorised
+      financeUncategorised,
+      shortLets
     });
     const nextActions = buildNextActions({
       issueCounts,
@@ -610,7 +671,8 @@ router.get('/today', (req, res) => {
       complianceCounts,
       intakeCounts,
       calendarConnected,
-      memoryFresh
+      memoryFresh,
+      shortLets
     });
     const commandBrief = buildCommandBrief({
       issueCounts,
@@ -619,14 +681,16 @@ router.get('/today', (req, res) => {
       approvalCounts,
       complianceCounts,
       calendarConnected,
-      memoryFresh
+      memoryFresh,
+      shortLets
     });
     const autonomy = buildAutonomyStatus({
       emailAccounts: emailAccountCount,
       calendarConnected,
       memoryFresh,
       ledgerEvents: ledgerEventsTotal,
-      approvalCounts
+      approvalCounts,
+      guestyConnected: shortLets.connected
     });
 
     const focus = [];
@@ -670,6 +734,14 @@ router.get('/today', (req, res) => {
         href: '/compliance'
       });
     }
+    if ((shortLets.totals?.payment_failed_events_30d || 0) || (shortLets.totals?.open_short_let_tasks || 0) || (shortLets.totals?.checkins_today || 0) || (shortLets.totals?.checkouts_today || 0)) {
+      focus.push({
+        tone: (shortLets.totals?.payment_failed_events_30d || 0) ? 'danger' : 'info',
+        title: 'Short lets',
+        detail: `${shortLets.totals?.checkins_today || 0} check-ins, ${shortLets.totals?.checkouts_today || 0} check-outs, ${shortLets.totals?.open_short_let_tasks || 0} open tasks`,
+        href: '/short-lets'
+      });
+    }
 
     res.json({
       date: new Date().toISOString(),
@@ -680,7 +752,19 @@ router.get('/today', (req, res) => {
         email: emailCounts,
         approvals: approvalCounts,
         compliance: complianceCounts,
-        intake: intakeCounts
+        intake: intakeCounts,
+        short_lets: {
+          connected: shortLets.connected,
+          listings: shortLets.totals?.listings || 0,
+          upcoming_reservations: shortLets.totals?.upcoming_reservations || 0,
+          checkins_today: shortLets.totals?.checkins_today || 0,
+          checkouts_today: shortLets.totals?.checkouts_today || 0,
+          occupancy_next_30: shortLets.totals?.next_30?.occupancy_pct || 0,
+          revenue_next_30: shortLets.totals?.next_30?.booked_revenue || 0,
+          gap_nights_next_30: shortLets.totals?.next_30?.gap_nights || 0,
+          open_tasks: shortLets.totals?.open_short_let_tasks || 0,
+          payment_failed_events_30d: shortLets.totals?.payment_failed_events_30d || 0
+        }
       },
       focus,
       command_brief: commandBrief,
@@ -699,6 +783,15 @@ router.get('/today', (req, res) => {
         accounts: calendarAccounts,
         events: calendarEvents
       },
+      short_lets: {
+        connected: shortLets.connected,
+        totals: shortLets.totals,
+        today: shortLets.today,
+        alerts: shortLets.alerts,
+        properties: shortLets.properties.slice(0, 6),
+        upcoming: shortLets.upcoming.slice(0, 6),
+        suggested_actions: shortLets.suggested_actions
+      },
       memory: {
         fresh_today: memoryFresh,
         latest_snapshot: latestMemorySnapshot,
@@ -707,8 +800,8 @@ router.get('/today', (req, res) => {
       },
       property_pulse: propertyPulse,
       desktop_notifications: {
-        critical_count: issueCounts.urgent + issueCounts.escalated + approvalCounts.high_risk + complianceCounts.expired,
-        reminder_count: taskCounts.due_today + emailCounts.draft_replies + complianceCounts.expiring_soon
+        critical_count: issueCounts.urgent + issueCounts.escalated + approvalCounts.high_risk + complianceCounts.expired + (shortLets.totals?.payment_failed_events_30d || 0),
+        reminder_count: taskCounts.due_today + emailCounts.draft_replies + complianceCounts.expiring_soon + (shortLets.totals?.checkins_today || 0) + (shortLets.totals?.checkouts_today || 0)
       }
     });
   } finally { db.close(); }

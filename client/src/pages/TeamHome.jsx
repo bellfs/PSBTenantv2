@@ -5,6 +5,7 @@ import { useAuth } from '../App';
 import {
   AlertCircle,
   ArrowUpRight,
+  BedDouble,
   Bell,
   Bot,
   Building2,
@@ -188,6 +189,8 @@ export default function TeamHome() {
   const laneHealth = today?.lane_health || [];
   const agentSuggestions = today?.agent_suggestions || [];
   const autonomy = today?.autonomy || {};
+  const shortLets = today?.short_lets || {};
+  const shortLetCounts = today?.counts?.short_lets || {};
 
   const name = useMemo(() => user?.name?.split(' ')[0] || 'team', [user]);
 
@@ -250,6 +253,14 @@ export default function TeamHome() {
           tone={today?.counts?.tasks?.due_today ? 'warning' : 'info'}
           icon={ClipboardList}
           to="/agents"
+        />
+        <AttentionCard
+          label="Short Lets"
+          value={`${shortLetCounts.checkins_today || 0}/${shortLetCounts.checkouts_today || 0}`}
+          sub={shortLetCounts.connected ? `${shortLetCounts.occupancy_next_30 || 0}% occupancy next 30 days` : 'Connect Guesty'}
+          tone={!shortLetCounts.connected ? 'warning' : (shortLetCounts.payment_failed_events_30d ? 'danger' : 'info')}
+          icon={BedDouble}
+          to="/short-lets"
         />
       </div>
 
@@ -465,6 +476,35 @@ export default function TeamHome() {
 
         <section className="card">
           <div className="card-header">
+            <h3>Short Lets</h3>
+            <Link to="/short-lets" className="btn btn-ghost btn-sm">Open <ArrowUpRight size={12} /></Link>
+          </div>
+          <div className="card-body team-list compact">
+            {!shortLets.connected ? (
+              <Link to="/short-lets" className="team-row warning">
+                <BedDouble size={15} />
+                <span>
+                  <strong>Connect Guesty</strong>
+                  <small>STR reservations and performance are not yet live.</small>
+                </span>
+                <ArrowUpRight size={14} />
+              </Link>
+            ) : (shortLets.upcoming || []).length === 0 ? (
+              <EmptyLine>No upcoming Guesty stays synced.</EmptyLine>
+            ) : (shortLets.upcoming || []).slice(0, 4).map(reservation => (
+              <Link to="/short-lets" key={reservation.id} className="team-row neutral">
+                <BedDouble size={15} />
+                <span>
+                  <strong>{reservation.property_name || reservation.listing_title || reservation.listing_nickname || 'Guesty booking'}</strong>
+                  <small>{reservation.check_in} to {reservation.check_out}{reservation.guest_name ? ` · ${reservation.guest_name}` : ''}</small>
+                </span>
+              </Link>
+            ))}
+          </div>
+        </section>
+
+        <section className="card">
+          <div className="card-header">
             <h3>Tasks</h3>
             <Link to="/agents" className="btn btn-ghost btn-sm">Manage <ArrowUpRight size={12} /></Link>
           </div>
@@ -521,6 +561,7 @@ export default function TeamHome() {
       <div className="team-tool-strip">
         <Link to="/compliance"><ShieldCheck size={16} /> Compliance</Link>
         <Link to="/utilities"><Zap size={16} /> Utilities</Link>
+        <Link to="/short-lets"><BedDouble size={16} /> Short Lets</Link>
         <Link to="/contractors"><Wrench size={16} /> Contractors</Link>
         <Link to="/business-memory"><Database size={16} /> Business Memory</Link>
         <Link to="/dashboard"><AlertCircle size={16} /> Analytics Dashboard</Link>

@@ -33,6 +33,7 @@ app.use('/api/compliance', require('./routes/compliance'));
 app.use('/api/utilities', require('./routes/utilities'));
 app.use('/api/inspections', require('./routes/inspections'));
 app.use('/api/finance', require('./routes/finance'));
+app.use('/api/guesty', require('./routes/guesty'));
 app.use('/api', require('./routes/api'));
 
 const clientBuild = path.join(__dirname, '..', 'client', 'dist');
@@ -69,6 +70,11 @@ app.listen(PORT, async () => {
     const { startEmailAgentScheduler } = require('./services/email-agent');
     startEmailAgentScheduler();
   } catch (e) { console.log('  Email agent scheduler skipped:', e.message); }
+
+  try {
+    const { startGuestyScheduler } = require('./services/guesty');
+    startGuestyScheduler();
+  } catch (e) { console.log('  Guesty scheduler skipped:', e.message); }
 
   // Auto-subscribe this app to the WABA for webhook delivery
   if (process.env.WHATSAPP_BUSINESS_ACCOUNT_ID && process.env.WHATSAPP_ACCESS_TOKEN) {

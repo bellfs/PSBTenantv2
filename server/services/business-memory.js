@@ -154,6 +154,8 @@ function collectTableCounts(db) {
     'bank_transactions', 'inspections', 'intake_items', 'intake_extractions',
     'email_accounts', 'email_agent_items', 'email_agent_drafts', 'email_agent_reports',
     'calendar_accounts', 'calendar_events', 'calendar_event_versions',
+    'guesty_accounts', 'guesty_listings', 'guesty_reservations', 'guesty_reservation_versions',
+    'guesty_webhook_events', 'guesty_daily_metrics',
     'agent_tasks', 'agent_approvals', 'agent_events', 'agent_runs', 'business_event_ledger'
   ];
   return tables.map(table => ({ table, count: safeScalar(db, `SELECT COUNT(*) as count FROM ${table}`) }));
@@ -425,6 +427,60 @@ function collectData() {
       ORDER BY COALESCE(ce.start_at, ce.updated_at, ce.last_seen_at) DESC
       LIMIT ?
     `, [DEFAULT_LIMITS.recentRows]);
+    const guestyAccounts = safeAll(db, `
+      SELECT ga.id, ga.account_name, ga.guesty_account_id, ga.webhook_id, ga.webhook_url,
+        ga.webhook_events_json, ga.sync_enabled, ga.last_sync_at, ga.last_webhook_at,
+        ga.connected_by_email, ga.connected_by_name, ga.created_at,
+        (SELECT COUNT(*) FROM guesty_listings gl WHERE gl.guesty_account_id = ga.id) as listing_count,
+        (SELECT COUNT(*) FROM guesty_reservations gr WHERE gr.guesty_account_id = ga.id) as reservation_count,
+        (SELECT COUNT(*) FROM guesty_webhook_events gwe WHERE gwe.guesty_account_id = ga.id) as webhook_event_count
+      FROM guesty_accounts ga
+      ORDER BY ga.sync_enabled DESC, ga.created_at DESC
+    `);
+    const guestyListings = safeAll(db, `
+      SELECT gl.*, p.name as property_name, p.address as property_address,
+        (SELECT COUNT(*) FROM guesty_reservations gr WHERE gr.guesty_account_id = gl.guesty_account_id AND gr.guesty_listing_id = gl.guesty_listing_id) as reservation_count
+      FROM guesty_listings gl
+      LEFT JOIN properties p ON p.id = gl.property_id
+      ORDER BY gl.active DESC, COALESCE(p.name, gl.title, gl.nickname) COLLATE NOCASE
+      LIMIT ?
+    `, [DEFAULT_LIMITS.recentRows]);
+    const guestyReservations = safeAll(db, `
+      SELECT gr.*, p.name as property_name, gl.title as listing_title, gl.nickname as listing_nickname,
+        (SELECT COUNT(*) FROM guesty_reservation_versions grv WHERE grv.guesty_account_id = gr.guesty_account_id AND grv.guesty_reservation_id = gr.guesty_reservation_id) as version_count
+      FROM guesty_reservations gr
+      LEFT JOIN properties p ON p.id = gr.property_id
+      LEFT JOIN guesty_listings gl ON gl.guesty_account_id = gr.guesty_account_id AND gl.guesty_listing_id = gr.guesty_listing_id
+      ORDER BY COALESCE(gr.check_in, gr.last_updated_at, gr.updated_at) DESC
+      LIMIT ?
+    `, [DEFAULT_LIMITS.recentRows]);
+    const guestyMetrics = safeAll(db, `
+      SELECT COALESCE(p.name, gl.title, gl.nickname, 'Unlinked Guesty listing') as property_name,
+        dm.property_id,
+        dm.guesty_listing_id,
+        COUNT(*) as metric_days,
+        SUM(dm.available_nights) as available_nights,
+        SUM(dm.occupied_nights) as occupied_nights,
+        SUM(dm.booked_revenue) as booked_revenue,
+        SUM(dm.booked_net_revenue) as booked_net_revenue,
+        AVG(dm.adr) as adr,
+        AVG(dm.revpar) as revpar,
+        MIN(dm.metric_date) as from_date,
+        MAX(dm.metric_date) as to_date
+      FROM guesty_daily_metrics dm
+      LEFT JOIN guesty_listings gl ON gl.guesty_account_id = dm.guesty_account_id AND gl.guesty_listing_id = dm.guesty_listing_id
+      LEFT JOIN properties p ON p.id = dm.property_id
+      WHERE dm.metric_date >= DATE('now', '-30 days') AND dm.metric_date <= DATE('now', '+90 days')
+      GROUP BY dm.property_id, dm.guesty_listing_id, property_name
+      ORDER BY booked_revenue DESC, occupied_nights DESC
+      LIMIT ?
+    `, [DEFAULT_LIMITS.recentRows]);
+    const guestyWebhookEvents = safeAll(db, `
+      SELECT *
+      FROM guesty_webhook_events
+      ORDER BY received_at DESC
+      LIMIT ?
+    `, [DEFAULT_LIMITS.recentShortRows]);
     const agentTasks = safeAll(db, `
       SELECT t.*, p.name as property_name, ten.name as tenant_name, i.uuid as issue_uuid
       FROM agent_tasks t
@@ -501,6 +557,11 @@ function collectData() {
       emailReports,
       calendarAccounts,
       calendarEvents,
+      guestyAccounts,
+      guestyListings,
+      guestyReservations,
+      guestyMetrics,
+      guestyWebhookEvents,
       agentTasks,
       agentApprovals,
       agentEvents,
@@ -709,6 +770,7 @@ The platform database and uploaded documents remain the source of truth. This fo
 - \`wiki/context/\` contains Durham, property-facts, supplier and workmen/team context agents should read first.
 - \`wiki/curated/\` contains source-controlled business canon distilled from local ChatGPT, WhatsApp, Codex and operating documents.
 - \`wiki/calendar/\` contains connected calendar context and observed calendar event versions.
+- \`wiki/short-lets/\` contains Guesty listings, reservations, webhooks and STR performance context.
 - \`wiki/source-of-record/\` contains the append-only business event ledger.
 - \`raw/\` contains source manifests, source counts and recent communication snippets.
 - \`agents/\` contains agent run, task, approval and event memory.
@@ -731,7 +793,7 @@ function buildAgentsReadme(generatedAt) {
 Use this filesystem as business context before acting inside FFR Property OS.
 
 1. Start with \`wiki/index.md\` and \`INDEX.json\`.
-2. Read \`wiki/curated/ffr-group/README.md\`, then \`wiki/context/property-operating-facts.md\`, \`wiki/context/durham-city.md\`, \`wiki/context/email-correspondence.md\`, \`wiki/context/energy-contracts-and-suppliers.md\` and \`wiki/context/workmen-team-contractors.md\` before property, supplier, contractor or correspondence work.
+2. Read \`wiki/curated/ffr-group/README.md\`, then \`wiki/context/property-operating-facts.md\`, \`wiki/context/durham-city.md\`, \`wiki/context/email-correspondence.md\`, \`wiki/context/energy-contracts-and-suppliers.md\`, \`wiki/context/workmen-team-contractors.md\` and \`wiki/short-lets/guesty.md\` before property, supplier, contractor, short-let or correspondence work.
 3. Treat SQLite, connected inboxes, uploaded documents and \`wiki/source-of-record/business-event-ledger.md\` as canonical where there is a conflict.
 4. Cite source ids, file paths, task ids, issue ids and email message ids in any recommendation.
 5. Do not send messages, approve spend, alter rent/deposit positions or instruct contractors without a platform approval.
@@ -1826,6 +1888,119 @@ ${table(cancelled.slice(0, 80), [
 `;
 }
 
+function buildGuestyShortLetsPage(data, generatedAt) {
+  const today = generatedAt.slice(0, 10);
+  const upcoming = data.guestyReservations.filter(row => {
+    const checkOut = value(row.check_out);
+    const status = value(row.status).toLowerCase();
+    return checkOut >= today && !/cancel|declined|expired|rejected/.test(status);
+  });
+  const unlinked = data.guestyListings.filter(row => !row.property_id);
+  const paymentFailures = data.guestyWebhookEvents.filter(row => row.event_type === 'payments.failed');
+  return `${frontmatter({
+    title: 'Guesty Short-Let Source of Record',
+    type: 'guesty_short_lets',
+    generated_at: generatedAt
+  })}# Guesty Short-Let Source of Record
+
+Guesty is the source system for short-let listings, reservations, OTA channel changes, guest messages, payment events and live calendar changes. FFR Property OS stores the latest state, keeps reservation versions, logs webhook deliveries and converts important events into Business Memory and agent tasks.
+
+## Agent Rules
+
+- Treat Guesty reservations as commercial commitments once status is confirmed/reserved/checked-in/checked-out.
+- Do not change pricing, availability, cancellation terms, payment handling, access or guest-facing messages without human approval.
+- For every booking, cross-reference property facts, calendar, email/WhatsApp context, cleaner/linen tasks and key/access notes.
+- For webhook events, preserve raw payloads, then fetch or sync the latest Guesty state before making operational recommendations.
+- Airbnb, Booking.com, Expedia, direct/manual and similar OTA sources belong to the short-let operating lane unless there is evidence they relate to long-let student tenancy.
+
+## Connected Guesty Accounts
+
+${table(data.guestyAccounts, [
+    { label: 'Account', value: 'account_name' },
+    { label: 'Sync', value: row => row.sync_enabled ? 'Active' : 'Paused' },
+    { label: 'Listings', value: 'listing_count' },
+    { label: 'Reservations', value: 'reservation_count' },
+    { label: 'Webhook events', value: 'webhook_event_count' },
+    { label: 'Last sync', value: 'last_sync_at' },
+    { label: 'Last webhook', value: 'last_webhook_at' },
+    { label: 'Webhook', value: row => row.webhook_url ? 'Configured' : '' }
+  ])}
+
+## Listing Map
+
+${table(data.guestyListings, [
+    { label: 'Property', value: row => row.property_name || 'Unlinked', max: 220 },
+    { label: 'Guesty listing', value: row => row.title || row.nickname || row.guesty_listing_id, max: 260 },
+    { label: 'Address', value: 'address', max: 280 },
+    { label: 'Bedrooms', value: 'bedrooms' },
+    { label: 'Accommodates', value: 'accommodates' },
+    { label: 'Active', value: row => row.active ? 'Yes' : 'No' },
+    { label: 'Reservations', value: 'reservation_count' },
+    { label: 'Last seen', value: 'last_seen_at' }
+  ])}
+
+## Performance Snapshot
+
+${table(data.guestyMetrics, [
+    { label: 'Property/listing', value: 'property_name', max: 240 },
+    { label: 'From', value: 'from_date' },
+    { label: 'To', value: 'to_date' },
+    { label: 'Available', value: 'available_nights' },
+    { label: 'Occupied', value: 'occupied_nights' },
+    { label: 'Occupancy', value: row => row.available_nights ? `${Math.round((Number(row.occupied_nights || 0) / Number(row.available_nights || 1)) * 100)}%` : '' },
+    { label: 'Revenue', value: row => money(row.booked_revenue) },
+    { label: 'Net', value: row => money(row.booked_net_revenue) },
+    { label: 'ADR', value: row => money(row.adr) },
+    { label: 'RevPAR', value: row => money(row.revpar) }
+  ])}
+
+## Upcoming Reservations
+
+${table(upcoming.slice(0, 120), [
+    { label: 'Check-in', value: 'check_in' },
+    { label: 'Check-out', value: 'check_out' },
+    { label: 'Property', value: row => row.property_name || row.listing_title || row.listing_nickname || 'Unlinked', max: 220 },
+    { label: 'Guest', value: 'guest_name', max: 180 },
+    { label: 'Code', value: 'confirmation_code' },
+    { label: 'Channel', value: row => row.channel || row.source },
+    { label: 'Status', value: 'status' },
+    { label: 'Nights', value: 'nights' },
+    { label: 'Revenue', value: row => money(row.total_price || row.accommodation_fare || row.host_payout) },
+    { label: 'Versions', value: 'version_count' }
+  ])}
+
+## Recent Webhook Events
+
+${table(data.guestyWebhookEvents, [
+    { label: 'Received', value: 'received_at' },
+    { label: 'Type', value: 'event_type' },
+    { label: 'External ID', value: 'external_id', max: 220 },
+    { label: 'Status', value: 'status' },
+    { label: 'Processed', value: 'processed_at' },
+    { label: 'Error', value: 'error', max: 260 }
+  ])}
+
+## Attention Lists
+
+### Unlinked Listings
+
+${table(unlinked, [
+    { label: 'Listing', value: row => row.title || row.nickname || row.guesty_listing_id, max: 260 },
+    { label: 'Address', value: 'address', max: 260 },
+    { label: 'Last seen', value: 'last_seen_at' }
+  ])}
+
+### Payment Failure Webhooks
+
+${table(paymentFailures.slice(0, 80), [
+    { label: 'Received', value: 'received_at' },
+    { label: 'External ID', value: 'external_id' },
+    { label: 'Status', value: 'status' },
+    { label: 'Error', value: 'error', max: 260 }
+  ])}
+`;
+}
+
 function buildBusinessLedgerPage(data, generatedAt) {
   const highImportance = data.businessLedger.filter(event => ['high', 'critical'].includes(value(event.importance).toLowerCase()));
   return `${frontmatter({
@@ -1916,6 +2091,8 @@ function buildDailyDigest(data, generatedAt) {
   const todayEmail = data.emailItems.filter(item => value(item.created_at).startsWith(todayPrefix));
   const todayEvents = data.agentEvents.filter(event => value(event.created_at).startsWith(todayPrefix));
   const todayCalendar = data.calendarEvents.filter(event => value(event.start_at).startsWith(todayPrefix) || value(event.last_seen_at).startsWith(todayPrefix));
+  const todayGuestyReservations = data.guestyReservations.filter(row => value(row.check_in).startsWith(todayPrefix) || value(row.check_out).startsWith(todayPrefix) || value(row.updated_at).startsWith(todayPrefix));
+  const todayGuestyEvents = data.guestyWebhookEvents.filter(row => value(row.received_at).startsWith(todayPrefix));
   const todayLedger = data.businessLedger.filter(event => value(event.happened_at).startsWith(todayPrefix) || value(event.observed_at).startsWith(todayPrefix) || value(event.created_at).startsWith(todayPrefix));
   const openTasks = data.agentTasks.filter(task => task.status === 'open');
   const pendingApprovals = data.agentApprovals.filter(approval => approval.status === 'pending');
@@ -1934,6 +2111,8 @@ ${table([
     { label: 'Intake items', value: todayIntake.length },
     { label: 'Email items', value: todayEmail.length },
     { label: 'Calendar items', value: todayCalendar.length },
+    { label: 'Guesty reservation signals', value: todayGuestyReservations.length },
+    { label: 'Guesty webhook events', value: todayGuestyEvents.length },
     { label: 'Agent events', value: todayEvents.length },
     { label: 'Ledger events', value: todayLedger.length },
     { label: 'Open tasks total', value: openTasks.length },
@@ -1970,6 +2149,23 @@ ${section('Calendar', table(todayCalendar.slice(0, 30), [
     { label: 'Start', value: 'start_at' },
     { label: 'Summary', value: 'summary', max: 260 },
     { label: 'Location', value: 'location', max: 220 },
+    { label: 'Status', value: 'status' }
+  ]))}
+
+${section('Guesty Short Lets', table(todayGuestyReservations.slice(0, 30), [
+    { label: 'Check-in', value: 'check_in' },
+    { label: 'Check-out', value: 'check_out' },
+    { label: 'Property', value: row => row.property_name || row.listing_title || row.listing_nickname || 'Unlinked', max: 240 },
+    { label: 'Guest', value: 'guest_name', max: 180 },
+    { label: 'Channel', value: row => row.channel || row.source },
+    { label: 'Status', value: 'status' },
+    { label: 'Revenue', value: row => money(row.total_price || row.accommodation_fare || row.host_payout) }
+  ]))}
+
+${section('Guesty Webhooks', table(todayGuestyEvents.slice(0, 30), [
+    { label: 'Received', value: 'received_at' },
+    { label: 'Type', value: 'event_type' },
+    { label: 'External ID', value: 'external_id' },
     { label: 'Status', value: 'status' }
   ]))}
 
@@ -2065,6 +2261,7 @@ function snapshotBusinessMemory(options = {}) {
       { type: 'context', id: 'energy-contracts-and-suppliers', title: 'Energy Contracts and Suppliers', path: 'wiki/context/energy-contracts-and-suppliers.md' },
       { type: 'context', id: 'workmen-team-contractors', title: 'Workmen Team and Contractors', path: 'wiki/context/workmen-team-contractors.md' },
       { type: 'calendar', id: 'calendar-source-of-record', title: 'Calendar Source of Record', path: 'wiki/calendar/source-of-record.md' },
+      { type: 'short_lets', id: 'guesty-source-of-record', title: 'Guesty Short-Let Source of Record', path: 'wiki/short-lets/guesty.md' },
       { type: 'source_of_record', id: 'business-event-ledger', title: 'Business Event Ledger', path: 'wiki/source-of-record/business-event-ledger.md' }
     );
     for (const file of curatedFiles) {
@@ -2079,6 +2276,7 @@ function snapshotBusinessMemory(options = {}) {
     bytesWritten += writeFile(root, 'wiki/context/energy-contracts-and-suppliers.md', buildEnergySuppliersPage(data, generatedAt), writtenFiles);
     bytesWritten += writeFile(root, 'wiki/context/workmen-team-contractors.md', buildWorkmenTeamPage(data, generatedAt), writtenFiles);
     bytesWritten += writeFile(root, 'wiki/calendar/source-of-record.md', buildCalendarPage(data, generatedAt), writtenFiles);
+    bytesWritten += writeFile(root, 'wiki/short-lets/guesty.md', buildGuestyShortLetsPage(data, generatedAt), writtenFiles);
     bytesWritten += writeFile(root, 'wiki/source-of-record/business-event-ledger.md', buildBusinessLedgerPage(data, generatedAt), writtenFiles);
     for (const file of curatedFiles) {
       bytesWritten += writeFile(root, file.targetPath, file.content, writtenFiles);
@@ -2105,6 +2303,7 @@ function snapshotBusinessMemory(options = {}) {
     bytesWritten += writeFile(root, 'wiki/comms/email.md', buildEmailPage(data, generatedAt), writtenFiles);
     bytesWritten += writeFile(root, 'wiki/comms/whatsapp.md', buildWhatsAppPage(data, generatedAt), writtenFiles);
     bytesWritten += writeFile(root, 'wiki/calendar/events.md', buildCalendarPage(data, generatedAt), writtenFiles);
+    bytesWritten += writeFile(root, 'wiki/operations/short-lets.md', buildGuestyShortLetsPage(data, generatedAt), writtenFiles);
     bytesWritten += writeFile(root, 'agents/tasks.md', buildTasksPage(data, generatedAt), writtenFiles);
     bytesWritten += writeFile(root, 'agents/approvals.md', buildApprovalsPage(data, generatedAt), writtenFiles);
     bytesWritten += writeFile(root, 'agents/runs.md', buildAgentRunsPage(data, generatedAt), writtenFiles);

@@ -114,10 +114,10 @@ const AGENTS = [
     mode: 'semi_auto',
     risk_level: 'medium',
     codex_enabled: true,
-    description: 'Coordinates Guesty/OTA listings, availability, access codes, guest comms, linen, housekeeping, owner stays, and net-income targets.',
-    triggers: ['Booking enquiry', 'Calendar change', 'Guesty alert', 'Cleaning change', 'Monthly revenue review'],
+    description: 'Coordinates Guesty/OTA listings, reservations, performance, availability, access codes, guest comms, linen, housekeeping, owner stays, and net-income targets.',
+    triggers: ['Guesty webhook', 'Booking enquiry', 'Calendar change', 'Payment failure', 'Guest message', 'Cleaning change', 'Monthly revenue review'],
     guardrails: ['Calendar opening/closure requires approval', 'Guest messages draft-only until approved', 'Checks conflict with long-term tenancy commitments'],
-    codex_prompt: 'You are the FFR short-let operator. Review listing, calendar, booking, cleaning, access, and revenue context. Recommend availability, pricing, operational actions, and conflict risks.'
+    codex_prompt: 'You are the FFR short-let operator. Read Business Memory including wiki/short-lets/guesty.md, Guesty reservations, listings, webhook events, email/WhatsApp context, calendar events, cleaning/access tasks and property facts. Recommend pricing, availability, guest-message, payment, cleaning, linen and access actions with owners, source evidence and approval requirements.'
   },
   {
     key: 'development_deals',

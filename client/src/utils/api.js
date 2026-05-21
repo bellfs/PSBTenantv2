@@ -208,4 +208,16 @@ export const api = {
   categoriseTransactions: (ids) => request('/finance/categorise', { method: 'POST', body: JSON.stringify({ transaction_ids: ids }) }),
   getFinanceSummary: (params = {}) => { const qs = new URLSearchParams(params).toString(); return request(`/finance/summary?${qs}`); },
   getFinanceCategories: () => request('/finance/categories'),
+
+  // Guesty / Short Lets
+  getGuestySummary: () => request('/guesty/summary'),
+  getGuestyAccounts: () => request('/guesty/accounts'),
+  addGuestyAccount: (data) => request('/guesty/accounts', { method: 'POST', body: JSON.stringify(data) }),
+  updateGuestyAccount: (id, data) => request(`/guesty/accounts/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  syncGuesty: (data = {}) => request('/guesty/sync', { method: 'POST', body: JSON.stringify(data) }),
+  syncGuestyAccount: (id, data = {}) => request(`/guesty/accounts/${id}/sync`, { method: 'POST', body: JSON.stringify(data) }),
+  registerGuestyWebhook: (data = {}) => request('/guesty/webhooks/register', { method: 'POST', body: JSON.stringify(data) }),
+  getGuestyWebhookConfig: () => request('/guesty/webhooks/config'),
+  getGuestyListings: () => request('/guesty/listings'),
+  getGuestyReservations: (limit = 100) => request(`/guesty/reservations?limit=${limit}`),
 };
